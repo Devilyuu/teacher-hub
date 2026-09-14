@@ -1,0 +1,176 @@
+/*!
+ * 高校教师智能工作台 · 设计契约令牌
+ * contract-version: 2.0.0
+ * generated-from: app/globals.css @ 2026-09-12
+ *
+ * 用途：备课系统（teaching-design-system）复制这一份并锁定版本，
+ * 使两套系统在用户眼里是同一个产品（规格 §7.7）。
+ *
+ * 三条使用规则：
+ *
+ * 1. **复制，不要引用。** 本期不增加跨项目运行时依赖——两个项目各自持有一份、
+ *    各自锁版本。等两套系统稳定且组件重合度足够高，再单独评估共享 UI 包。
+ * 2. **只增不改。** 需要新令牌就在自己项目里另起前缀，不要改这里的值：
+ *    改了就等于两套系统悄悄分叉，而分叉在用户那边表现为"点过去像换了个产品"。
+ * 3. **本文件是 app/globals.css 的子集**，由
+ *    `lib/design-contract.test.ts` 的门禁盯着。源头改了这里没跟上，测试会红。
+ *
+ * 不包含的东西：
+ * - Tailwind 的 `@theme` 映射（`--color-*`）——那是本项目的构建细节；
+ * - 语义色板（`--h-*`）与 `--badge-ring`——那是课题健康度专用，
+ *   备课系统没有"结题要求是否齐备"这个概念，抄过去只会被拿去当装饰；
+ * - `.surface` 等组件类——写法见同目录 README.md，各自实现。
+ *
+ * ── 变更 ──────────────────────────────────────────────────────
+ * 2.0.0 (2026-09-12) **大改版，破坏性**。墨黑极简整套换成
+ *   「淡青画布 + 青绿主色 + 淡描边 + 14px 圆角 + 彩色功能图标」。
+ *
+ *   换的理由不是"更好看"，是使用者变了：平台要给别的老师用，而老师判断
+ *   "这是不是个正经系统"的参照物是教务系统、学习通、政务 OA。
+ *
+ *   备课系统要跟进的四件事：
+ *   a. 主色 `--primary` 从墨黑变青绿，**深色下降饱和到雾面**
+ *      （近黑底配高饱和原色有霓虹感，白天看尤其扎眼）；
+ *   b. 圆角 22px → 14px，按钮从全胶囊改成 `--radius-lg`（≈10px），
+ *      **图标按钮仍是正圆**；
+ *   c. 卡片改成 **1px 淡描边 + 阴影**，不再是"浅色只有阴影"；
+ *   d. **导航从顶部胶囊改成左侧竖排**，新增 `--sidebar-w`。
+ *      1.x 的注释写着"两套系统都是顶部导航，不做侧边栏"，那条作废。
+ *
+ *   另外新增 `--well`（中间调）和 `--decor-*`（装饰色板）。装饰色板有一条
+ *   形态铁律跟着一起抄：**淡底 11~15% + 线性描边图标，永不实心、永不带
+ *   语义文字**。本平台靠这条形态差异让彩色图标和语义色共存，备课系统
+ *   即使没有语义色，也照这条做才不会两边气质分叉。
+ *
+ * 1.1.0 (2026-08-12) 画布从冷灰绿转暖象牙。已被 2.0.0 整体取代。
+ * 1.0.0 (2026-08-05) 首版。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 圆角：--radius 本身就是卡片圆角，别再往上乘系数。
+     从 22px 收到 14px——22px 配的是卡片墙，这版是密集列表和表格 */
+  --radius: 0.875rem; /* 14px */
+  --sidebar-w: 13.375rem; /* 214px，收起后 66px */
+
+  /* 卡片：浅色 1px 淡描边 + 极淡弥散阴影。
+     上一版是"不描边只靠阴影"，那是白卡浮在象牙底上的打法；
+     现在画布和卡片的色差更小，光靠阴影卡片边界会糊 */
+  --card-shadow: 0 1px 2px rgb(16 30 28 / 4%), 0 8px 20px -14px rgb(16 30 28 / 16%);
+  --card-shadow-hover: 0 1px 3px rgb(16 30 28 / 6%), 0 14px 30px -16px rgb(16 30 28 / 22%);
+  --pill-shadow: 0 1px 2px rgb(16 30 28 / 4%);
+
+  /* 画布是**带一点青的淡灰**，卡片纯白。色相跟着主色走 */
+  --background: #f3f6f5;
+  --foreground: #17201f;
+
+  --card: #ffffff;
+  --card-foreground: #17201f;
+  --popover: #ffffff;
+  --popover-foreground: #17201f;
+
+  /* 中间调：画布和纯白卡片之间的第三档明度，只装「虚」的东西——
+     托盘、空状态、图标圆片、未选中的筛选胶囊、表头。正式内容放白卡上 */
+  --well: #edf2f1;
+
+  /* 品牌主色：青绿。
+     **不是翠绿**——翠绿在本产品里有确定含义（结题要求已齐备）。
+     青绿(色相 180)和翠绿(色相 160)差 20 度，配合形态区分足够分开 */
+  --primary: #0e9384;
+  --primary-foreground: #ffffff;
+
+  --secondary: #eef3f2;
+  --secondary-foreground: #1e2928;
+  --muted: #eef3f2;
+  --muted-foreground: #65756f;
+  --accent: #e3f4f1;
+  --accent-foreground: #0b7a6d;
+
+  --destructive: #dc2626;
+
+  --border: #e4eae9;
+  --input: #dde5e3;
+  --ring: #0e9384;
+
+  /* 图表用色：主色的深浅 + 两档中性。**不要往这里塞语义色相** */
+  --chart-1: #0e9384;
+  --chart-2: #5cc5b8;
+  --chart-3: #9ad8cf;
+  --chart-4: #64748b;
+  --chart-5: #cbd5e1;
+
+  /* 装饰色板：功能图标的底片。
+     **形态锁死：淡底 + 线性描边图标，永不实心、永不承载语义。** */
+  --decor-blue: #3b82f6;
+  --decor-blue-bg: rgb(59 130 246 / 11%);
+  --decor-violet: #8b5cf6;
+  --decor-violet-bg: rgb(139 92 246 / 11%);
+  --decor-amber: #f59e0b;
+  --decor-amber-bg: rgb(245 158 11 / 13%);
+  --decor-rose: #f43f5e;
+  --decor-rose-bg: rgb(244 63 94 / 11%);
+  --decor-teal: #14b8a6;
+  --decor-teal-bg: rgb(20 184 166 / 12%);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* 深色只有落影，没有「0 0 0 1px」那层——卡片自己有 border，
+     两层边叠着画会让每张卡都糊一圈 */
+  --card-shadow: 0 12px 28px -22px rgb(0 0 0 / 90%);
+  --card-shadow-hover: 0 16px 34px -20px rgb(0 0 0 / 95%);
+  --pill-shadow: none;
+
+  /* 近黑，中性，**不带主色色相**。浅色画布带一点青是"纸的凉意"，
+     同样的色相放到近黑上就是一层泥（青绿会变墨绿） */
+  --background: #0b0e0f;
+  --foreground: #e9eef0;
+
+  --card: #171b1d;
+  --card-foreground: #e9eef0;
+  /* 浮层必须不透明：下拉盖在表格上，透明会把下面的行漏上来 */
+  --popover: #1c2124;
+  --popover-foreground: #e9eef0;
+
+  /* **半透明白，不是一个更暗的实色。** 浅色的 well 是凹槽（比白卡暗），
+     直译到深色就成了一个洞。半透明白叠在卡片上提亮、叠在画布上也提亮，
+     一份定义两处都对 */
+  --well: rgb(255 255 255 / 6%);
+
+  /* 主色降到雾面：近黑底上高饱和青绿会有霓虹感 */
+  --primary: #5cc5b8;
+  --primary-foreground: #08211e;
+
+  --secondary: rgb(255 255 255 / 8%);
+  --secondary-foreground: #e9eef0;
+  --muted: rgb(255 255 255 / 8%);
+  --muted-foreground: #99a3a8;
+  --accent: rgb(92 197 184 / 14%);
+  --accent-foreground: #8ad9cf;
+
+  --destructive: #e08d9d;
+
+  --border: #262c2f;
+  --input: #333b3f;
+  --ring: #5cc5b8;
+
+  --chart-1: #5cc5b8;
+  --chart-2: #8ad9cf;
+  --chart-3: #b7e7e0;
+  --chart-4: #7d8a92;
+  --chart-5: #444e54;
+
+  /* 装饰色板：雾面版。底片透明度略抬（近黑上 11% 看不见） */
+  --decor-blue: #86abdb;
+  --decor-blue-bg: rgb(134 171 219 / 15%);
+  --decor-violet: #a99bd4;
+  --decor-violet-bg: rgb(169 155 212 / 15%);
+  --decor-amber: #d9b86a;
+  --decor-amber-bg: rgb(217 184 106 / 15%);
+  --decor-rose: #e08d9d;
+  --decor-rose-bg: rgb(224 141 157 / 15%);
+  --decor-teal: #7cc9bf;
+  --decor-teal-bg: rgb(124 201 191 / 15%);
+}

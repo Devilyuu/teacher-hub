@@ -1,0 +1,114 @@
+# Phase 0–2 只在本地跑（PRD 6 部署节奏）。
+#
+# 日常开发建议：`npm run db:up` 只起数据库，Next.js 在宿主机跑 `npm run dev`，
+# 热更新快得多。想验证容器化整体是否可用时再 `docker compose --profile full up`。
+
+# 必须显式写死项目名：Compose 默认拿目录名当项目名，而本仓库目录叫「课题罗盘」，
+# 全是非 ASCII 字符，被 Compose 的命名规则过滤后变成空串，直接报
+# "project name must not be empty"。
+name: keticompass
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: keticompass-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-keti}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-keti_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-keticompass}
+      # 中文排序与大小写规则
+      LANG: zh_CN.utf8
+      # 与 app 保持同一时区，否则日志时间戳和应用里的时间对不上，排查时会打架
+      TZ: ${TZ:-Asia/Shanghai}
+    # 生产基础配置不向宿主机发布数据库端口；app 只通过 Compose 内部网络访问。
+    # Windows 本地开发需要直连时，由 docker-compose.dev.yml 显式增加 15432 映射。
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keti} -d ${POSTGRES_DB:-keticompass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    profiles: ["full"]
+    build:
+      context: .
+    container_name: keticompass-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 容器内走服务名，不是 localhost
+      DATABASE_URL: postgresql://${POSTGRES_USER:-keti}:${POSTGRES_PASSWORD:-keti_dev_pw}@postgres:5432/${POSTGRES_DB:-keticompass}?schema=public
+      APP_PASSCODE: ${APP_PASSCODE:?请在 .env 里设置 APP_PASSCODE}
+      APP_SESSION_SECRET: ${APP_SESSION_SECRET:?请在 .env 里设置 APP_SESSION_SECRET}
+      AUDIO_TEMP_ROOT: /var/lib/teacher-desk-audio
+      AUDIO_QUOTA_BYTES: ${AUDIO_QUOTA_BYTES:-2147483648}
+      TRANSCRIPTION_LEASE_MINUTES: ${TRANSCRIPTION_LEASE_MINUTES:-30}
+      MAINTENANCE_TOKEN: ${MAINTENANCE_TOKEN:-}
+      TENCENT_ASR_APP_ID: ${TENCENT_ASR_APP_ID:-}
+      TENCENT_SECRET_ID: ${TENCENT_SECRET_ID:-}
+      TENCENT_SECRET_KEY: ${TENCENT_SECRET_KEY:-}
+      MINUTES_API_BASE_URL: ${MINUTES_API_BASE_URL:-}
+      MINUTES_API_KEY: ${MINUTES_API_KEY:-}
+      MINUTES_MODEL: ${MINUTES_MODEL:-}
+      # 备课系统（独立部署）。**少了这两行，.env 里填了也等于没填**——
+      # compose 只把这里显式列出的变量传进容器，.env 仅用于插值。
+      # 3.6 交付时漏了它们，表现是教学页一直显示「还没接上备课系统」而无任何报错
+      TEACHING_APP_URL: ${TEACHING_APP_URL:-}
+      TEACHING_IMPORT_TOKEN: ${TEACHING_IMPORT_TOKEN:-}
+      NODE_ENV: production
+      # 镜像里已经写死东八区，这里再给一遍是为了能在服务器上用环境变量改，
+      # 不必重新构建镜像。理由见 Dockerfile 里那段注释
+      TZ: ${TZ:-Asia/Shanghai}
+    # 刻意**不往宿主机映射端口**：唯一入口是下面的 caddy，绕不过 HTTPS。
+    # 生产模式下 session cookie 带 Secure 标志，走明文 HTTP 会被浏览器直接丢掉，
+    # 表现是「输对口令也一直弹回登录页」——把 3000 暴露出去只会制造这种幽灵故障。
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    volumes:
+      # 附件本地存储（PRD 6）
+      - ./data/uploads:/app/data/uploads
+      # 与附件、仓库及备份隔离的私有临时音频卷
+      - audio_temp:/var/lib/teacher-desk-audio
+
+  # 反向代理 + 自动 HTTPS。配置在 ./Caddyfile
+  caddy:
+    profiles: ["full"]
+    image: caddy:2-alpine
+    container_name: keticompass-caddy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # 线上填已备案的域名；本地演练填 localhost，Caddy 会自动改用内置 CA
+      APP_DOMAIN: ${APP_DOMAIN:?请在 .env 里设置 APP_DOMAIN（本地演练可填 localhost）}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # 80 不只是给跳转用的，Let's Encrypt 的 HTTP-01 校验也走它，别关
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书与账户密钥。**要一起备份**，理由见 Caddyfile 里的注释
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
+
+volumes:
+  audio_temp:

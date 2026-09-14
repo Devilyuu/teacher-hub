@@ -1,0 +1,42 @@
+# 反向代理 + 自动 HTTPS。只在 `--profile full` 下起作用，部署步骤见 docs/deploy.md。
+#
+# 域名不写死，从环境变量 APP_DOMAIN 来：同一份配置本地演练填 localhost、线上填真域名。
+
+{$APP_DOMAIN} {
+	# 证书全自动：域名已备案且 80/443 可达时，Caddy 向 Let's Encrypt 申请并自动续期，
+	# 到期前 30 天续、失败自动重试，不需要任何 cron。
+	# APP_DOMAIN 填 localhost 或 IP 时 Caddy 自动改用内置 CA 签自签证书——
+	# 本地演练不必改这份配置，只是浏览器会警告一次。
+	#
+	# 证书落在容器的 /data，compose 把它挂到宿主机 ./data/caddy。
+	# **这个目录要一起备份**：删了会重新申请，而 Let's Encrypt 有签发频率限制
+	# （同一域名每周 5 次），反复重建容器可能把额度用光、几天签不出来。
+
+	encode zstd gzip
+
+	# 音频单文件允许 100MiB；给 multipart 边界和字段留到 105MB，
+	# 与 Next 代理和 Nginx 入口保持一致，让应用负责给出中文校验提示。
+	request_body {
+		max_size 105MB
+	}
+
+	header {
+		# 装的是完整职业履历，不给浏览器再走一次明文的机会。
+		# 刻意不加 includeSubDomains：不知道你填的是主域名还是子域名，
+		# 填主域名时它会把同域下所有站点一起锁进 HTTPS，影响面超出本平台
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		# 不能用 DENY：附件面板的 PDF 预览是同源 <iframe>（components/attachment-panel.tsx）
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# 别对外报自己是什么服务
+		-Server
+	}
+
+	@next_image path /_next/image
+	respond @next_image 404
+
+	# 走 compose 内部网络的服务名。app 服务不再对宿主机暴露端口，
+	# 唯一入口就是这里，绕不过 HTTPS
+	reverse_proxy app:3000
+}

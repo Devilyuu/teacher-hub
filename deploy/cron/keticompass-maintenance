@@ -1,0 +1,15 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 每 10 分钟推进一次转写生命周期（增量 3.3 / 3.4，规格 §5.3）：
+#   - 超过租约仍停在 TRANSCRIBING 的记录退回 UPLOADED
+#   - 滞留超过 10 分钟的 UPLOADED 主动推进一次转写（用户传完就关页面也要能跑起来）
+#   - 未确认录音第 6 天提醒、第 7 天删除音频
+#   - DELETE_PENDING 的删除重试
+#
+# 没有这条，录音能传能转写，但生命周期管理整个是停的。
+#
+# **令牌不写进这个文件。** /etc/cron.d 下的文件是 644、全局可读，
+# 把 MAINTENANCE_TOKEN 写死在这里等于对所有本机用户公开它；
+# 改为运行时从 /opt/keticompass/.env（600）读取。
+*/10 * * * * ubuntu cd /opt/keticompass && set -a && . ./.env && set +a && curl -fsS -X POST -H "X-Maintenance-Token: ${MAINTENANCE_TOKEN}" https://desk.example.com/api/maintenance/cleanup >> /var/log/keticompass-maintenance.log 2>&1

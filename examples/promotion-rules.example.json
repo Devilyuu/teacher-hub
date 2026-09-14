@@ -1,0 +1,70 @@
+{
+  "year": 2026,
+  "source": "示例：某校《专业技术职务评聘业绩量化考核表》（虚构，仅演示格式）",
+  "sourceNote": "学校改表时换一个 year 再导一次，旧年度原样保留——历史成果仍按当年的表解释。",
+  "seriesTotals": {
+    "teacher": 40,
+    "lab": 40,
+    "ideology": 32,
+    "eduAdmin": 32
+  },
+  "generalNotes": [
+    "所列成果按任现职以来取得的计算（示例说明）。",
+    "同一成果适用多个指标时只按一项计分（示例说明）。"
+  ],
+  "indicators": [
+    {
+      "code": "1.1",
+      "major_indicator": "教学工作",
+      "major_cap": 16,
+      "minor_indicator": "教学质量考核",
+      "scoring_rule": "年度考核优秀每次 2 分，良好每次 1 分",
+      "cap": 8,
+      "cap_group": "1.1",
+      "applies_to": ["TEACHER", "LAB", "IDEOLOGY", "EDU_ADMIN"]
+    },
+    {
+      "code": "1.2",
+      "major_indicator": "教学工作",
+      "major_cap": 16,
+      "minor_indicator": "课程建设",
+      "scoring_rule": "国家级在线开放课程每门 8 分，省级 5 分，校级 2 分",
+      "cap": 8,
+      "cap_group": "1.2",
+      "applies_to": ["TEACHER", "LAB"]
+    },
+    {
+      "code": "2.1",
+      "major_indicator": "科研成果",
+      "major_cap": 24,
+      "minor_indicator": "学术论文",
+      "scoring_rule": "核心期刊每篇 5 分，一般期刊每篇 2 分",
+      "remark": "第一作者或通讯作者",
+      "cap": 12,
+      "cap_group": "2.1+2.2",
+      "applies_to": ["TEACHER", "LAB", "IDEOLOGY", "EDU_ADMIN"]
+    },
+    {
+      "code": "2.2",
+      "major_indicator": "科研成果",
+      "major_cap": 24,
+      "minor_indicator": "纵向课题",
+      "scoring_rule": "国家级每项 8 分，省级 5 分，市级 2 分",
+      "remark": "与 2.1 合并封顶 12 分",
+      "cap": 12,
+      "cap_group": "2.1+2.2",
+      "cap_note": "2.1 与 2.2 共用一个上限",
+      "applies_to": ["TEACHER", "LAB", "IDEOLOGY", "EDU_ADMIN"]
+    },
+    {
+      "code": "2.3",
+      "major_indicator": "科研成果",
+      "major_cap": 24,
+      "minor_indicator": "横向项目和知识产权",
+      "scoring_rule": "到账经费每 10 万元 1 分；发明专利每件 4 分，软件著作权每件 0.5 分",
+      "cap": 12,
+      "cap_group": "2.3",
+      "applies_to": ["TEACHER", "LAB", "IDEOLOGY", "EDU_ADMIN"]
+    }
+  ]
+}

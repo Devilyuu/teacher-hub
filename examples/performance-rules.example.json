@@ -1,0 +1,59 @@
+{
+  "year": 2026,
+  "source": "示例：某二级学院《年度超额工作绩效积分对照表》（虚构，仅演示格式）",
+  "rules": [
+    {
+      "category": "教学工作",
+      "subcategory": "课程标准修订",
+      "school_rule": "1/门",
+      "college_rule": "0.5/门",
+      "remark": "以学院教学工作委员会审定通过为准",
+      "sort_order": 10
+    },
+    {
+      "category": "教学工作",
+      "subcategory": "精品在线开放课程",
+      "national_rule": "25/门",
+      "provincial_rule": "12/门",
+      "school_rule": "5/门",
+      "remark": "团队项目，负责人填报",
+      "is_team": true,
+      "sort_order": 20
+    },
+    {
+      "category": "科研与社会服务",
+      "subcategory": "纵向课题立项",
+      "national_rule": "25/项",
+      "provincial_rule": "15/项",
+      "city_rule": "8/项",
+      "school_rule": "3/项",
+      "remark": "个人申报，按立项通知落款年度计",
+      "sort_order": 30
+    },
+    {
+      "category": "科研与社会服务",
+      "subcategory": "软件著作权登记",
+      "base_rule": "3/件",
+      "remark": "个人申报，上限 10 分",
+      "sort_order": 40
+    },
+    {
+      "category": "育人成效",
+      "subcategory": "指导学生竞赛获奖",
+      "national_rule": "20/项",
+      "provincial_rule": "10/项",
+      "city_rule": "4/项",
+      "school_rule": "1/项",
+      "remark": "以获奖证书为准",
+      "sort_order": 50
+    },
+    {
+      "category": "教学质量",
+      "subcategory": "年度教学质量考核优秀",
+      "school_rule": "5/次",
+      "remark": "学院分配名额",
+      "is_department_assigned": true,
+      "sort_order": 60
+    }
+  ]
+}

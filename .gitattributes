@@ -1,0 +1,24 @@
+# 行尾规范。
+#
+# 下面这些文件要在 Linux 服务器上执行或被解析，**必须是 LF**。
+#
+# 为什么需要这个文件：Windows 上 `core.autocrlf=true` 时，`git archive`
+# 会按 working tree 的口径导出，把 LF 转成 CRLF。而部署正是用
+# `git archive HEAD | ssh 'tar -x'` 同步源码的（见 docs/deploy.md），
+# 于是服务器上的脚本全变成 CRLF，bash 执行时报：
+#
+#     scripts/backup.sh: line 20: $'\r': command not found
+#
+# 最坏的地方在于它**静默失效**：backup.sh 和 restore.sh 平时没人跑，
+# 等到真要恢复数据那天才发现两个都是坏的。2026-07-29 实际踩过一次——
+# 上一次部署把 9 个文件转成了 CRLF，直到下一次部署前备份才暴露出来。
+#
+# 只约束服务器相关文件，不对整个仓库做 `* text=auto`：那会产生一次
+# 覆盖全部源码的行尾变更，把真正的改动淹掉。
+*.sh                text eol=lf
+Dockerfile          text eol=lf
+*.yml               text eol=lf
+*.yaml              text eol=lf
+Caddyfile           text eol=lf
+deploy/**           text eol=lf
+.dockerignore       text eol=lf

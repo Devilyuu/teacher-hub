@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          # Bootstrap only for this isolated ephemeral service; never an app secret.
+          POSTGRES_USER: teacher_desk_ci
+          POSTGRES_PASSWORD: teacher_desk_ci_password
+          POSTGRES_DB: teacher_desk_quality
+        options: >-
+          --health-cmd "pg_isready -U teacher_desk_ci -d teacher_desk_quality"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+        ports: ["5432:5432"]
+    env:
+      DATABASE_URL: postgresql://teacher_desk_ci:teacher_desk_ci_password@127.0.0.1:5432/teacher_desk_quality
+      APP_DOMAIN: ci.invalid
+      UPLOAD_ROOT: /tmp/teacher-desk-ci-uploads
+      RUNTIME_IMAGE: teacher-desk-ci-runtime:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Generate test-only application secrets
+        run: |
+          passcode="$(openssl rand -base64 32)"
+          session_secret="$(openssl rand -base64 48)"
+          echo "::add-mask::$passcode"
+          echo "::add-mask::$session_secret"
+          {
+            echo "APP_PASSCODE=$passcode"
+            echo "APP_SESSION_SECRET=$session_secret"
+          } >> "$GITHUB_ENV"
+      - run: npm run db:generate
+      - run: npx prisma migrate deploy
+      - run: npx prisma db seed
+      - name: Import performance rule catalog
+        run: npm run import:perf-rules -- --apply
+      - name: Import promotion rule catalog
+        run: npm run import:promotion-rules -- --apply
+      - run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx prisma validate
+      - run: npm run verify:export-run
+      - run: npm run verify:project-outcomes
+      - run: npm run verify:meeting-recording
+      - run: npm run verify:requirement-materials
+      - run: npm run verify:personal-documents
+      - run: npm run verify:material-zip
+      - run: npm run verify:closeout-docx
+      - run: npm run verify:full-backup
+      - run: npm run verify:teaching-import
+      - run: npm run verify:backup-safety
+      - run: npm run verify:passcode-script
+      - run: npm run verify:server-actions-auth
+      - run: npm run verify:compose-security
+      - run: npm run build
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/never_connect
+          UPLOAD_ROOT: /tmp/teacher-desk-ci-build-uploads
+      - run: npm run verify:build-trace
+      - run: docker build -t "$RUNTIME_IMAGE" .
+      - name: Verify runtime image
+        run: npm run verify:runtime-image
+        timeout-minutes: 5
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: quality
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          # Bootstrap only for this isolated ephemeral service; never an app secret.
+          POSTGRES_USER: teacher_desk_ci
+          POSTGRES_PASSWORD: teacher_desk_ci_password
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd "pg_isready -U teacher_desk_ci -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+        ports: ["5432:5432"]
+    env:
+      E2E_POSTGRES_ADMIN_URL: postgresql://teacher_desk_ci:teacher_desk_ci_password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Verify E2E signal cleanup
+        run: npm run test:e2e:signal-drill
+        timeout-minutes: 4
+        env:
+          # Force the signal probe to own a labeled container so it can verify
+          # database, container, PG data, and upload cleanup as one lifecycle.
+          E2E_POSTGRES_ADMIN_URL: ""

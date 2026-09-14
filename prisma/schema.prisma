@@ -1,0 +1,1710 @@
+// 高校教师智能工作台 teacher-desk · 数据模型
+// 字段口径以 各模块 PRD 第 2 节为准。数据库字段用英文，中文映射在 lib/labels.ts。
+//
+// Project 是课题唯一数据源，ProjectPerformanceEvent 保存课题的绩效事实；
+// Achievement 只保存真实成果，SchoolRewardDecision 保存学校奖励审定。
+// 模型分两域，将来出多账号版沿这条缝切（见 CLAUDE.md 第 13 条）：
+//   台账域  Achievement / PerfCategory / PromotionCategory / SchoolRewardDecision / Attachment
+//   个人域  Project / ProjectPerformanceEvent / Requirement / RequirementLink / Member / Profile / CaptureItem
+//
+// 阶段编号见 docs/superpowers/specs/2026-07-29-phase-2-3-design.md §11 的增量清单。
+// CheckRecord / Submission / Material 明确不做（见 CLAUDE.md「当前进度」）。
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── 枚举 ────────────────────────────────────────────────────────────
+
+/// 行政级别。PRD 2.1 与 2.3 的取值略有出入（成果侧没列 BUREAU），
+/// 这里合并成一个枚举，省得维护两份几乎一样的中文映射。
+/// UNRATED（待确认）必须保留——存量数据里有相当一部分记录的级别没核实过。
+///
+/// **「横向」不在这里**：它既不是行政级别也不是研究类型，而是"钱和委托从哪来"，
+/// 已独立成 FundingType。曾经 level 和 category 各有一个 HORIZONTAL，
+/// 同一个概念散在两处，界面上"横向"会冒出三次。
+enum Level {
+  NATIONAL // 国家级
+  PROVINCIAL // 省级（含省部级）
+  MUNICIPAL // 市级
+  DISTRICT // 区级
+  BUREAU // 局级
+  SCHOOL // 校级（含单位级）
+  COLLEGE // 学院级（系部/二级学院，比校级低一档）
+  INDUSTRY // 行业级
+  UNRATED // 待确认
+}
+
+/// 申报性质（prd-ledger 2.1）。学校表把它当成每条记录的属性，不单设大类。
+enum DeclareNature {
+  PROCESS // 过程性工作：有执行过程和阶段材料，但尚未形成最终成果
+  RESULT // 成果性工作：已获奖 / 立项 / 结项 / 发表 / 授权 / 到账
+}
+
+/// 职称申报系列（人事处《业绩量化考核分类表》的四列）。
+/// 同一个二级指标未必四个系列都能用，如 6.3 文件起草只对思政、教管系列开放。
+enum TitleSeries {
+  TEACHER // 教师系列
+  LAB // 实验系列
+  IDEOLOGY // 思政系列
+  EDU_ADMIN // 教管系列
+}
+
+/// 成果的「用途」——三个正交维度里的第三个（CLAUDE.md 第 11 条）。
+///
+/// 和学校口径分类（PerfCategory）、AchievementType 各管各的，**不许互推**：
+/// 绩效表里很多成果算积分但评职称用不上，而课题罗盘涉及的课题、论文基本都能用。
+///
+/// 注意与「职称附加分」区分：那是绩效表里的一个计分大类，这是筛选标记，不是一回事。
+///
+/// **它是意图标记，不是客观事实。** 「这条能不能评职称」的客观答案是
+/// 「它在人事处那张表上坐不坐得进某一格」，即 promotionCategoryId 有没有值。
+/// 成果库的职称口径按后者过滤，usableFor 只做辅助筛选。
+enum AchievementUsage {
+  PERFORMANCE // 绩效
+  PROMOTION // 职称
+  PROJECT_CLOSING // 结题挂接
+}
+
+/// 研究类型。与 FundingType 正交——一个横向项目同样可以是科研。
+enum ProjectCategory {
+  RESEARCH // 科研
+  TEACHING_REFORM // 教改
+  EDU_RESEARCH // 教研
+  OTHER // 其他
+}
+
+/// 纵向 / 横向。学术圈最基本的一刀：
+/// 纵向是政府或院校立项拨款，横向是企业委托的合同研究。
+enum FundingType {
+  VERTICAL // 纵向
+  HORIZONTAL // 横向
+}
+
+enum ProjectRole {
+  LEAD // 主持
+  CO_LEAD // 第一参与
+  MEMBER // 参与
+}
+
+/// 立项状态。
+///
+/// **REJECTED（未获立项）和 TERMINATED（已终止）必须分开**，它们不是一回事：
+/// 前者从没立项、没编号、没经费，只有一份申报书；后者拿过立项、可能有经费、
+/// 中途才黄。绩效上两者的分也不同——纵向课题按「基本分 3 + 级别分」相加算，
+/// 未获立项只拿基本分 3，立项后终止的仍按级别拿 3+15（省级）。
+/// 混成一个状态，导出年度绩效包时必然算错（一条省级差 15 分）。
+enum ProjectStatus {
+  DRAFT // 拟申报
+  APPLYING // 申报中
+  REJECTED // 未获立项：申报了没中，绩效上仍有基本分
+  ONGOING // 在研
+  CLOSING // 结题准备
+  CLOSED // 已结题
+  TERMINATED // 已终止：立项后中途终止
+}
+
+enum AchievementType {
+  PAPER // 论文
+  REPORT // 研究报告
+  TEXTBOOK // 教材
+  CASE // 案例
+  PATENT // 专利
+  SOFTWARE_COPYRIGHT // 软著
+  AWARD // 获奖
+  COURSE // 课程
+  STUDENT_ACHIEVEMENT // 指导学生
+  MEDIA_REPORT // 媒体报道
+  FUNDING_RECEIPT // 经费到账
+  TRAINING // 培训讲座
+  SOCIAL_SERVICE // 社会服务
+  OTHER // 其他
+}
+
+/// 论文/报告的完整生命周期。非论文类成果前端只放出
+/// PLANNED / WRITING / DRAFTED / ACCEPTED / PUBLISHED 这几档。
+/// REVISING → CHECKING 必须允许回退，降重是循环过程。
+enum AchievementStatus {
+  PLANNED // 选题
+  TITLED // 拟题定稿
+  WRITING // 写作中
+  DRAFTED // 初稿完成
+  CHECKING // 查重/AIGC检测
+  SUBMITTED // 已投稿
+  UNDER_REVIEW // 外审中
+  REVISING // 修回中
+  ACCEPTED // 已录用
+  PUBLISHED // 已见刊
+  INDEXED // 已收录
+  REJECTED // 退稿
+  SHELVED // 暂缓
+}
+
+/// 附件类型。结题时要交的材料就这几类，按类型分组比按文件名找快得多。
+enum AttachmentKind {
+  PROPOSAL // 申报书
+  APPROVAL // 立项通知
+  CONTRACT // 合同
+  MIDTERM // 中期检查材料
+  FINAL_REPORT // 结题报告
+  CERTIFICATE // 结题证书
+  AWARD_CERTIFICATE // 获奖证书。台账里这类最多，和结题证书不是一回事
+  ACCEPTANCE // 录用通知
+  PUBLICATION // 见刊页
+  INDEX_PROOF // 收录证明
+  CHECK_REPORT // 查重报告
+  REFERENCE // 研究参考。看过的文献、政策文件、同行方案，不是本课题的产出
+  PROCESS_EVIDENCE // 过程证据。调研照片、会议签到、访谈记录这类"做过"的凭证
+  TEACHING_PLAN // 教案。备课系统回流的产物（增量 3.6），先把类型占住
+  OTHER // 其他
+}
+
+/// 日期可信精度。存量记录里只有一小部分精确到日，
+/// 强行把"2016—2017年"转成 2016-01-01 就是在制造假数据。
+enum DatePrecision {
+  DAY
+  MONTH
+  YEAR
+  RANGE
+  UNKNOWN
+}
+
+enum ProjectPerformanceEventKind {
+  APPLY
+  APPROVED
+  FUNDING
+  CLOSEOUT
+  OTHER
+}
+
+/// 学校突出成果奖励的业务领域。该枚举只向前增加值，不删除或重命名已有值。
+enum SchoolRewardDomain {
+  PARTY_IDEOLOGY
+  TEACHING
+  RESEARCH
+  SOCIAL_SERVICE
+  COMPREHENSIVE_HONOR
+}
+
+enum ExportKind {
+  PERF_DECLARATION
+  PROMOTION_DECLARATION
+  PROJECT_CLOSEOUT
+  MATERIAL_ZIP
+}
+
+// ─── 课题 ────────────────────────────────────────────────────────────
+
+/// PRD 2.1
+model Project {
+  id          String          @id @default(cuid())
+  title       String
+  /// 卡片显示用的简称
+  shortTitle  String?
+  /// 课题编号，如 MZGZ202601。允许为空（存量课题不少没编号），
+  /// 但填了就必须唯一——prd-projects 6.1 里存量索引有同一课题"未立项/已立项"两行，
+  /// 这个约束能让导入脚本在重复时报错而不是静默插两条。
+  code        String?         @unique
+  level       Level           @default(UNRATED)
+  category    ProjectCategory @default(RESEARCH)
+  /// 纵向 / 横向
+  fundingType FundingType     @default(VERTICAL)
+
+  /// 立项来源单位。原先是自由文本 grantingBody，改成外键是为了能按来源分组统计——
+  /// "明州市社科联"多打一个字就会被算成两家
+  sourceId String?
+  source   ProjectSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  /// 承担单位
+  hostUnit String?
+  role     ProjectRole   @default(LEAD)
+  status   ProjectStatus @default(DRAFT)
+
+  /// 本人在成员名单里排第几（主持人通常是 1）
+  ownerOrder  Int?
+  /// 成员总数。与 ownerOrder 一起渲染成「3/6」；
+  /// 拆成两个整数而不是存 "3/6" 文本，是为了能排序、能按"排前三"筛、
+  /// 将来申报书素材里能自动算"近五年主持/前三位参与 X 项"
+  memberCount Int?
+
+  /// 申报截止日（DRAFT/APPLYING 期的倒计时用它）
+  applyDeadline   DateTime? @db.Date
+  /// 立项日
+  startDate       DateTime? @db.Date
+  /// 研究期终止日
+  endDate         DateTime? @db.Date
+  /// 结题材料提交截止日。看板倒计时用这个，不是 endDate
+  closingDeadline DateTime? @db.Date
+
+  fundingTotal    Decimal? @db.Decimal(12, 2)
+  /// 已到账，横向项目的关键字段
+  fundingReceived Decimal? @db.Decimal(12, 2)
+
+  /// 人事处职称量化表上的二级指标，正常是 5.2 纵向课题 或 5.3 横向项目和知识产权。
+  ///
+  /// **课题的职称分挂在课题自己身上，不派生成果记录。**
+  /// 职称量化表对课题通常是按项赋分，不是立项一次、结题再一次。
+  /// 线上绩效库把课题立项/结题各记一条成果（导入时就有不少条如此），
+  /// 那是绩效口径的记法，职称口径下一个课题只有一行。
+  promotionCategoryId String?
+  promotionCategory   PromotionCategory? @relation(fields: [promotionCategoryId], references: [id], onDelete: SetNull)
+  /// 职称量化分，人工填。系统只显示规则不算分（第 1 条）
+  promotionScore      Decimal?           @db.Decimal(6, 2)
+
+  /// 研究内容，AI 建议成果规划时作为输入
+  researchContent String?
+  note            String?
+
+  /// 归档后不占看板位置但可检索
+  archivedAt   DateTime?
+  /// 导入历史课题时保留的原始时间表述，如"2016—2017年"
+  dateText     String?
+  /// Obsidian 笔记路径，详情页回跳用；不做双向同步
+  obsidianPath String?
+
+  requirements      Requirement[]
+  members           Member[]
+  attachments       Attachment[]
+  performanceEvents ProjectPerformanceEvent[]
+  schoolRewards     SchoolRewardDecision[]
+
+  /// 日常模块迁入后的反查（Phase 3）：课题详情页的「任务」Tab 靠它
+  tasks          Task[]
+  recurringRules RecurringRule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([archivedAt])
+  @@index([fundingType])
+  @@index([sourceId])
+}
+
+/// 立项来源单位，如「明州市社科联」「明州市科学技术局」「明州市教育科学研究院」。
+/// 单人使用，条目就几十个，新建课题时可以现场添加。
+model ProjectSource {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  /// 备注，如归口处室、常见申报时间
+  note      String?
+  /// 排序权重，常打交道的排前面
+  sortOrder Int     @default(0)
+
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+}
+
+/// PRD 2.2。rawText 是真相来源，constraints 只承担能机器校验的部分。
+model Requirement {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// 可接受的成果类型。空数组 = 不限类型；多元素 = "任选"型要求
+  allowedTypes  AchievementType[]
+  requiredCount Int               @default(1)
+  /// 立项文件原文照抄
+  rawText       String
+  /// 结构化约束，可用 key 见 PRD 2.2；无法结构化的塞进 constraints.extra 数组
+  constraints   Json              @default("{}")
+  /// 该项单独的截止日（有的成果要先交）
+  dueDate       DateTime?         @db.Date
+  sortOrder     Int               @default(0)
+
+  links     RequirementLink[]
+  /// 关联的课题级材料（规格 6.4）。和 links 是两条不同的路：
+  /// links 指向成果，这里指向课题自己的附件
+  materials RequirementAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, sortOrder])
+}
+
+// ─── 成果 ────────────────────────────────────────────────────────────
+
+/// prd-ledger 2.1。成果独立于课题存在，只通过 RequirementLink 挂接，
+/// 不要给它加 projectId 外键。
+model Achievement {
+  id     String            @id @default(cuid())
+  type   AchievementType
+  title  String
+  status AchievementStatus @default(PLANNED)
+
+  authorPosition Int?
+  /// 本人角色（第一作者/负责人/主编/参编…），自由文本
+  ownerRole      String?
+  level          Level   @default(UNRATED)
+  /// 期刊/出版社，自由文本
+  journalName    String?
+  journalLevel   Level?
+  /// 收录情况（CNKI / EI / SCI / 无）。与 level 分开：level 是行政级别，这里是收录级别
+  indexedBy      String?
+  /// 字数，研究报告类必填
+  wordCount      Int?
+
+  /// 定稿日
+  completedAt   DateTime?     @db.Date
+  /// 见刊/授权/获奖日
+  publishedAt   DateTime?     @db.Date
+  /// 原始时间表述，如"2019—2020学年第一学期"
+  dateText      String?
+  /// 上面两个日期字段的可信精度，界面按它渲染
+  datePrecision DatePrecision @default(UNKNOWN)
+
+  /// 主题 / 场景标签，自由文本：AI教育方向 / 数字媒体方向 / 论文写作 / 产教融合…
+  ///
+  /// **不要拿它表达「用途」**——那是 usableFor 的活。存量数据从 Obsidian 的
+  /// 「可用于」列导进来时两者混在一起（既有"职称评审"也有"AI教育方向"），
+  /// 已把其中明确表示用途的两个值搬进 usableFor，剩下的留在这里当主题标签。
+  tags         String[]
+  /// 支撑材料出处（文件名或链接），附件未上传时的线索
+  evidenceRef  String?
+  /// Obsidian 笔记路径
+  obsidianPath String?
+  /// 来源系统的记录标识，导入去重用（如 `jixiao:42` 指线上绩效库的 achievements.id=42）。
+  /// **不是跨系统引用**——原来那套「与绩效系统分工、以对方为准」的约定已作废，
+  /// Achievement 只保存真实成果；课题及其绩效事实分别由 Project 与
+  /// ProjectPerformanceEvent 保存。留着只为重复导入时能认出老记录。
+  externalRef  String?  @unique
+  /// 信息是否已核实，对应成果库里的"待确认"
+  isVerified   Boolean  @default(false)
+  note         String?
+
+  // ── 台账层字段（prd-ledger 2.1）。绩效申报要用，课题罗盘不关心 ──
+
+  /// 学校口径分类。三个正交维度之一，与 type、usableFor 各管各的
+  perfCategoryId String?
+  perfCategory   PerfCategory? @relation(fields: [perfCategoryId], references: [id], onDelete: SetNull)
+
+  /// 人事处职称量化表上的二级指标。**为 null 就意味着这条评职称用不上**，
+  /// 成果库的职称口径据此过滤——它是客观事实，比 usableFor 那个意图标记可靠。
+  /// 与 perfCategoryId 各管各的，不许互推（第 11 条）
+  promotionCategoryId String?
+  promotionCategory   PromotionCategory? @relation(fields: [promotionCategoryId], references: [id], onDelete: SetNull)
+  /// 职称量化分，人工填。系统只显示 scoringRule 不算分（第 1 条）。
+  /// **与下面三个绩效分值分属两套口径，不要互相赋值**
+  promotionScore      Decimal?           @db.Decimal(6, 2)
+
+  /// 申报年度。**与 publishedAt 分开**——跨年成果按哪年报是人工决定的，
+  /// 12 月见刊的论文报次年很常见
+  year          Int?
+  declareNature DeclareNature @default(RESULT)
+  /// 当前阶段，只有过程性工作填
+  stage         String?
+
+  /// 以下三个分值是**绩效口径**，一律人工填，系统只显示规则不算分（设计原则第 1 条）。
+  /// 职称口径的分在上面的 promotionScore
+  baseScore     Decimal? @db.Decimal(6, 2)
+  perfScore     Decimal? @db.Decimal(6, 2)
+  declaredScore Decimal? @db.Decimal(6, 2)
+
+  isTeamProject Boolean @default(false)
+  /// 团队成员与分值分配说明，自由文本
+  teamNote      String?
+
+  /// 用途，多选。空数组表示还没判定，不等于"都不能用"
+  usableFor AchievementUsage[]
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）。
+  /// 只占位，不实现权限系统
+  ownerId String?
+
+  links                    RequirementLink[]
+  attachments              Attachment[]
+  /// 由哪条速记转来（二期 §6.1）。绝大多数成果没有，是直接建的
+  capturedFrom             CaptureItem?
+  /// 2.7 迁移时由哪条课题绩效事实替代；只用于追溯历史成果副本
+  legacyProjectPerformance ProjectPerformanceEvent?
+  schoolRewards            SchoolRewardDecision[]
+  /// 由哪些回流教案引用而来（规格 6.6）。绝大多数成果没有
+  teachingImports          TeachingImport[]
+  /// 由哪些参赛记录引用而来。同样是人工「引用为成果」的产物，不自动建
+  competitionEntries       CompetitionEntry[]
+
+  /// 历史课题绩效副本迁移后软归档，不删除原始记录
+  archivedAt    DateTime?
+  archiveReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([year])
+  @@index([perfCategoryId])
+  @@index([archivedAt])
+}
+
+/// 绩效大类 / 小类与积分规则（prd-ledger 2.2）。
+///
+/// 六列分级规则**原样照抄学校 Excel，不解析成数字**——源表里是
+/// 「10/次」「0.5/万元（上限10分）」「10/项（市级）、5/项（市辖区级）」「——」
+/// 这类写法，没有统一语法，硬解析必然出错。系统只把规则显示给人看，
+/// 分数由人工填（CLAUDE.md 第 1 条：只计算，不判定）。
+///
+/// 这也是「学校口径分类」这一维度的落地：它和 AchievementType（缺口计算用）、
+/// 用途（绩效/职称/结题）互相正交，不许互推（第 11 条）。
+model PerfCategory {
+  id String @id @default(cuid())
+
+  /// 规则表适用年度。学校每年发一版对照表、分值会调，
+  /// 旧年度的成果必须仍按当年的规则解释，所以按年度并存而不是覆盖
+  year Int
+
+  /// 9 大类之外，源表还有「职称附加分」和「其他有价值工作（自定义）」，共 11 个
+  majorCategory String
+  minorCategory String
+
+  /// 以下六列为 Excel 原文。null 表示该级别不适用（源表写作「——」或留空）
+  baseRule       String?
+  nationalRule   String?
+  provincialRule String?
+  cityRule       String?
+  schoolRule     String?
+  collegeRule    String?
+
+  /// 备注原文，装着封顶说明、赋分条件、申报方式等无法结构化的要求，
+  /// 如「个人申报，上限 10 分」「团队项目，验收后按贡献分配」
+  remark String?
+
+  isTeam               Boolean @default(false)
+  isDepartmentAssigned Boolean @default(false)
+  /// 学校当年停用的条目。不删——历史成果可能还挂在上面
+  isActive             Boolean @default(true)
+  sortOrder            Int     @default(0)
+
+  achievements             Achievement[]
+  projectPerformanceEvents ProjectPerformanceEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, majorCategory, minorCategory])
+  @@index([year, majorCategory])
+}
+
+/// 课题的立项、获批、到账、结题等绩效事实。课题仍是唯一真相来源，
+/// 不再为这些事实派生 Achievement 副本。
+model ProjectPerformanceEvent {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  kind ProjectPerformanceEventKind
+  year Int
+
+  dateText      String?
+  occurredAt    DateTime?     @db.Date
+  datePrecision DatePrecision @default(UNKNOWN)
+
+  perfCategoryId String?
+  perfCategory   PerfCategory? @relation(fields: [perfCategoryId], references: [id], onDelete: SetNull)
+
+  baseScore     Decimal? @db.Decimal(6, 2)
+  perfScore     Decimal? @db.Decimal(6, 2)
+  declaredScore Decimal? @db.Decimal(6, 2)
+
+  isVerified Boolean @default(false)
+  note       String?
+
+  externalRef String? @unique
+
+  legacyAchievementId String?      @unique
+  legacyAchievement   Achievement? @relation(fields: [legacyAchievementId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, year])
+  @@index([perfCategoryId])
+}
+
+/// 学校突出成果奖励审定。奖励对象必须且只能是一个 Project 或 Achievement；
+/// exactly-one-target 由迁移中的 PostgreSQL CHECK 保证。
+model SchoolRewardDecision {
+  id String @id @default(cuid())
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  achievementId String?
+  achievement   Achievement? @relation(fields: [achievementId], references: [id], onDelete: Restrict)
+
+  approvedAt      DateTime           @db.Date
+  batch           String?
+  domain          SchoolRewardDomain
+  awardItem       String
+  awardLevel      String?
+  awardAmountYuan Decimal?           @db.Decimal(12, 2)
+  evidenceRef     String?
+  note            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([achievementId])
+}
+
+/// 人事处《业绩量化考核表》的指标目录（附件1 分类表 + 附件2 赋分细则）。
+///
+/// **这是第四个正交维度，不是 PerfCategory 的别名。** 两张表是两套坐标系：
+///   PerfCategory      二级学院浮动绩效二次分配用 —— 分钱
+///   PromotionCategory 人事处职称评审量化用（一级 / 二级两层指标，按系列算总分）—— 评职称
+///
+/// 一条成果可以同时挂两边、也可以只挂一边。**挂不上本表就意味着评职称用不上**，
+/// 成果库的「职称口径」视图正是据此过滤——这比手工勾 usableFor 可靠，
+/// 因为它是「在人事处那张表上坐哪一格」的客观事实，不是意图标记。
+///
+/// 和 PerfCategory 一样：**不许写映射函数在两套分类之间互推**（CLAUDE.md 第 11 条）。
+/// 人事处和二级学院各自改各自的表，映射一写就烂。
+model PromotionCategory {
+  id String @id @default(cuid())
+
+  /// 文件版本年度。人事处改表时换年度并存，历史成果仍按当年的表解释
+  year Int
+
+  /// 二级指标编号，如 "5.2"。申报表、材料目录里到处引用它，所以它是业务键
+  code String
+
+  /// 一级指标名，如 "科研成果及业绩"
+  majorIndicator String
+  /// 一级指标封顶分，如 50
+  majorCap       Decimal @db.Decimal(6, 2)
+  /// 二级指标名，如 "纵向课题"
+  minorIndicator String
+
+  /// 赋分细则原文，**照抄附件2 不解析**。理由同 PerfCategory：
+  /// 「国家级每项加6分」「到账经费每10万元0.8分，上限8分」没有统一语法，
+  /// 硬解析必然出错。系统只把规则显示给人看，分数人工填（第 1 条：只计算不判定）
+  scoringRule String
+  /// 备注原文，装着封顶说明、认定部门、排名系数等无法结构化的要求
+  remark      String?
+
+  /// 本栏封顶分
+  cap      Decimal? @db.Decimal(6, 2)
+  /// 共用封顶的分组标记。**有几组二级指标共用一个上限**——
+  /// 2.3+2.4 合并上限 3 分、4.1+4.2 合并 10 分、4.5+4.6 合并 9 分。
+  /// 独占封顶时等于 code
+  capGroup String?
+  /// cap 不是原文直接给出而是推出来时，写清怎么来的（目前只有 2.1）
+  capNote  String?
+
+  /// 哪几个申报系列能用这一项（附件1 的 ●/◌）
+  appliesTo TitleSeries[]
+
+  sortOrder Int @default(0)
+
+  achievements Achievement[]
+  projects     Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, code])
+  @@index([year, majorIndicator])
+}
+
+/// 职称量化表的年度版本头。附件2 末尾那 10 条说明和附件1 的四个系列总分
+/// 都是整表级别的，挂不到任何一个二级指标上，单独一行存。
+///
+/// 说明里有几条填分时必须照着看：排名系数 1/0.5/0.4/0.3/0.2/0.1、
+/// 「同一成果适合多个项目时仅按一个项目计算」、「所有成果均为任现职以来到
+/// 申报年度上一年的 12 月 31 日」。
+model PromotionRuleset {
+  year Int @id
+
+  /// 文件出处
+  source       String
+  /// 附件2 末尾的说明，逐条原文
+  generalNotes String[]
+
+  /// 四个系列的满分（量化表表头）。各系列之间的差额来自不适用的指标
+  teacherTotal  Decimal @db.Decimal(6, 2)
+  labTotal      Decimal @db.Decimal(6, 2)
+  ideologyTotal Decimal @db.Decimal(6, 2)
+  eduAdminTotal Decimal @db.Decimal(6, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 个人常用文档分类（个人常用文档设计 §数据模型）。可现场添加，名称全库唯一。
+model DocCategory {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  sortOrder   Int          @default(0)
+  attachments Attachment[]
+}
+
+/// 附件（prd-support 5）。文件本体存在磁盘 data/uploads 下，
+/// 库里只存**相对路径**——存绝对路径的话换台机器、上云就全废了。
+model Attachment {
+  id String @id @default(cuid())
+
+  /// 课题、成果、个人常用文档类别、教案回流、学生荣誉、参赛记录六个归属恰好选一个。
+  projectId          String?
+  project            Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  achievementId      String?
+  achievement        Achievement?      @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  docCategoryId      String?
+  /// 分类被附件引用时禁止删除；SetNull 会撞五选一 CHECK，Cascade 会遗留磁盘文件。
+  docCategory        DocCategory?      @relation(fields: [docCategoryId], references: [id], onDelete: Restrict)
+  /// 教案回流带来的 DOCX（规格 6.6）。用户点「引用为成果」后，这一列清空、
+  /// achievementId 赋值，两步必须在同一条 UPDATE 里完成——中间态过不了 CHECK
+  teachingImportId   String?
+  teachingImport     TeachingImport?   @relation(fields: [teachingImportId], references: [id], onDelete: Cascade)
+  /// 学生荣誉的奖状照片/扫描件（班主任模块）
+  studentHonorId     String?
+  studentHonor       StudentHonor?     @relation(fields: [studentHonorId], references: [id], onDelete: Cascade)
+  /// 参赛记录的赛事通知、报名表、获奖证书（指导参赛模块）
+  competitionEntryId String?
+  competitionEntry   CompetitionEntry? @relation(fields: [competitionEntryId], references: [id], onDelete: Cascade)
+
+  kind        AttachmentKind @default(OTHER)
+  /// 材料编号（prd-support 5）。要在申报表、材料目录、ZIP 文件名里保持一致。
+  /// 线上绩效库里形如 `1-1`（成果序号-材料序号），导入时原样带过来
+  code        String?
+  /// 用户上传时的原始文件名，下载时按它还原
+  filename    String
+  /// 相对 data/uploads 的路径。磁盘上的实际文件名是随机的，
+  /// 避免同名覆盖，也避免用户起的文件名带路径分隔符
+  storagePath String         @unique
+  /// 字节数，列表里显示大小用
+  size        Int
+  mimeType    String
+  note        String?
+
+  uploadedAt DateTime @default(now())
+
+  /// 被哪些结题要求项引用。只有课题级材料会有值（见 RequirementAttachment）
+  requirements RequirementAttachment[]
+
+  @@index([projectId, kind])
+  @@index([achievementId, kind])
+  @@index([docCategoryId])
+  @@index([teachingImportId])
+  @@index([studentHonorId])
+  @@index([competitionEntryId])
+}
+
+/// 教案回流状态（规格 6.6）。
+enum TeachingImportStatus {
+  RECEIVED // 收到，等用户处理
+  ADOPTED // 已引用为成果
+  DISMISSED // 已忽略（可撤销）
+  FAILED // 接收过程出错，保留现场供重试
+}
+
+/// 备课系统送来的教案（规格 6.6、7.6）。
+///
+/// **不自动创建成果。** v1 直接建 Achievement 违反第 1 条铁律，而且教案是按周
+/// 产出的——自动入库会把待核实队列淹掉，那个队列本来就是用来盯住"还没归类的
+/// 记录"的。回流只落在这张表，用户点「引用为成果」才写台账。
+model TeachingImport {
+  id String @id @default(cuid())
+
+  /// 来源系统标识与对方的记录 ID。两者组成幂等键：
+  /// 靠数据库唯一约束兜住重试，不靠先查后写——并发重试下后者会双双查空、双双插入
+  externalSystem String
+  externalId     String
+
+  title      String
+  courseName String?
+  /// 学期，形如 `2025-2026 第二学期`。它一直都在 note 里，但那是拼给人读的一整串
+  /// （学期 · 班级 · 摘要），拆不出来——一门课教了几个学期正是要分开看的东西。
+  /// 规范化是来源系统的事，这里只当字符串收
+  term       String?
+  /// **纯日期列**，读写一律走 lib/date.ts（代码约定）
+  finishedAt DateTime? @db.Date
+  note       String?
+  /// 原始载荷，供排查"对方到底送了什么"。**必须剥掉令牌**——
+  /// 整体转存请求是这里最容易犯且最难发现的错，平时毫无症状，
+  /// 直到某天全库 JSON 备份把它一起送出门
+  payload    Json
+
+  status        TeachingImportStatus @default(RECEIVED)
+  /// 用户「引用为成果」后才有
+  achievementId String?
+  achievement   Achievement?         @relation(fields: [achievementId], references: [id], onDelete: SetNull)
+  failureReason String?
+
+  attachments Attachment[]
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）
+  ownerId    String?
+  receivedAt DateTime  @default(now())
+  handledAt  DateTime?
+
+  @@unique([externalSystem, externalId])
+  @@index([status, receivedAt])
+}
+
+/// 结题要求项 ↔ 课题级材料（规格 6.4）。
+///
+/// **只连课题级材料。** 服务端强制 `attachment.projectId === requirement.projectId`
+/// 且 projectId 不为空。成果级证据（论文 PDF、录用通知这些挂在 Achievement 上的
+/// 附件）不走这张表——它们经 RequirementLink → Achievement → attachments 到达
+/// 要求项。两条路各自成立，材料 ZIP 打包时各取一次再按 attachment id 去重。
+///
+/// 关联本身不等于达标；isQualified 只能由用户人工确认，系统不按材料类型、
+/// 文件名或上传状态推断（CLAUDE.md 第 1 条，系统只计算不判定）。
+model RequirementAttachment {
+  id            String      @id @default(cuid())
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  attachmentId  String
+  attachment    Attachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  /// 这份材料是用来说明这条要求的哪一面，如「第三章对应中期指标」
+  note          String?
+
+  /// 人工确认该材料本身满足本条要求；上传或关联绝不自动勾选。
+  isQualified Boolean   @default(false)
+  qualifiedAt DateTime?
+  qualifyNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([requirementId, attachmentId])
+  @@index([attachmentId])
+}
+
+/// PRD 2.4 核心表。isQualified 只能人工勾选，系统永远不自动判定。
+model RequirementLink {
+  id            String      @id @default(cuid())
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  /// 人工确认达标。不受成果状态限制——拿到录用通知就会先勾
+  isQualified Boolean   @default(false)
+  qualifiedAt DateTime?
+  qualifyNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([requirementId, achievementId])
+  @@index([achievementId])
+}
+
+// ─── 其他 ────────────────────────────────────────────────────────────
+
+/// prd-projects 2.7
+model Member {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name       String
+  unit       String?
+  role       String?
+  /// 是否企业方
+  isExternal Boolean @default(false)
+
+  sortOrder Int @default(0)
+
+  @@index([projectId, sortOrder])
+}
+
+/// 我的档案（prd-support 2）。全库只有一行，素材变量替换的数据来源。
+model Profile {
+  id         String  @id @default(cuid())
+  /// 本人姓名，对应 {{本人姓名}}
+  name       String
+  /// 承担单位，对应 {{承担单位}}
+  unit       String
+  department String?
+  title      String?
+
+  /// 现职称与取得日期。附件2 说明第 2 条：职称量化只算「任现职以来」到申报年度
+  /// 上一年 12 月 31 日的成果，成果库的职称口径按 currentTitleSince 过滤。
+  /// **纯日期列**，读写一律走 lib/date.ts（代码约定）
+  currentTitle      String?
+  currentTitleSince DateTime? @db.Date
+
+  phone             String?
+  email             String?
+  /// 本地 Obsidian vault 根路径，用于把 obsidianPath 拼成 obsidian:// 链接
+  obsidianVaultPath String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 学期（设置页维护的字典，CLAUDE.md 第 12 条：字典一律是表）。
+/// 每学期开学前加一条，首页「第 N 教学周」由 startDate 推算（lib/semester.ts）。
+/// **只存锚点不存周次**——周次是导出量，存下来就会过期。
+model Semester {
+  id   String @id @default(cuid())
+  /// 学期名，如「2026-2027-1」
+  name String @unique
+
+  /// 开学日 = 第一教学周的第一天。**纯日期列**，读写一律走 lib/date.ts
+  startDate DateTime @db.Date
+
+  /// 这学期的课表条目。学期删了课表跟着走——课表离开开学日就算不出「本周」
+  timetable TimetableSlot[]
+
+  createdAt DateTime @default(now())
+}
+
+/// 课表条目：某学期里「星期几 · 第几到第几节 · 哪些周」上一门课。
+///
+/// **一条 = 教务系统课表格子里的一行**（同一格可能几门课、几段周次叠着），
+/// 周次先展开成整数数组存好，首页算「本周有哪几个半天有课」只做包含判断，
+/// 不在渲染时再解析一遍「13周,18-19周」这类原文。原文仍整条留在 rawText。
+///
+/// 半天（上午/下午/晚上）不是字段，由节次推算（lib/timetable.ts）：
+/// 存的是教务系统给的节次，半天只是首页那张卡的显示粒度。
+///
+/// 没有「来源」字段：导入按学期整表覆盖，手工补的行同样被覆盖。
+/// 课表一学期导一次，为区分两种来源再做一套合并规则不值得。
+model TimetableSlot {
+  id String @id @default(cuid())
+
+  semesterId String
+  semester   Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+
+  /// 1 = 周一 … 7 = 周日
+  weekday     Int
+  periodStart Int
+  periodEnd   Int
+  /// 展开后的教学周次，如 [10, 11, 12, 13]
+  weeks     Int[]
+  /// 周次原文，如「13周,18-19周」，界面上显示它而不是重新拼
+  weeksText String
+
+  courseName String
+  /// 教学班组成，如「数字媒体2601;数字媒体2602」
+  className String?
+  location  String?
+  /// 导入时的整条原文，供排查「教务系统到底给了什么」；手工录入为 null
+  rawText String?
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）
+  ownerId   String?
+  createdAt DateTime @default(now())
+
+  @@index([semesterId, weekday, periodStart])
+}
+
+/// 可选功能模块的开关（设置页维护）。注册表在 lib/modules.ts，
+/// 这里只存与默认值不同步的覆盖：**没有行 = 用注册表默认值**。
+///
+/// 存表不存环境变量：勾选后立即生效不用重启；且模块偏好是个人域的东西，
+/// 将来多账号版按人存（CLAUDE.md 第 13 条），进库才顺路。
+/// 关闭只影响显示（导航、搜索、路由提示页），不动任何数据。
+model ModuleSetting {
+  /// lib/modules.ts 的 ModuleKey。刻意不用枚举——枚举值加了不可回滚，
+  /// 而模块清单是代码层的注册表，库里只是键值存储
+  key     String  @id
+  enabled Boolean
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）
+  ownerId   String?
+  updatedAt DateTime @updatedAt
+}
+
+/// 全站操作日志，详情页时间轴由它渲染（prd-projects 2.7）。
+/// 不加外键：被记录的实体删掉后日志仍应保留。
+model ActivityLog {
+  id         String @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  detail     Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+}
+
+// ─── 日常（Phase 3，从 dept-cockpit 迁入）─────────────────────────────
+//
+// 全部属于**个人域**（CLAUDE.md 第 13 条）：将来的多账号版只开放台账层，
+// 任务、会议、轮派都是私人的。
+//
+// 迁入时做的三处改造，别改回去：
+//   1. 原表用 `String + // 注释` 当枚举，这里一律换成 Prisma enum，
+//      中文映射进 lib/labels.ts（代码约定：任何组件都不许自己写死中文）
+//   2. `Task.relatedProject` 从自由文本换成指向 Project 的外键
+//      （prd-routines 2：合并本身最大的收益之一）
+//   3. 日期一律走 lib/date.ts 的 UTC 纯日期口径，不再带一套 Asia/Shanghai 的
+
+/// 任务来源。上级布置的和自己想起来的，处理优先级完全不同
+enum TaskSource {
+  SUPERIOR // 上级布置
+  MEETING // 例会派发
+  SELF // 自我待办
+}
+
+enum TaskPriority {
+  HIGH
+  NORMAL
+  LOW
+}
+
+/// 任务状态。**没有「已取消」**——不做了就删（软删除进回收站），
+/// 多一档状态就多一处要判断的分支，而单人使用没有交代对象
+enum TaskStatus {
+  TODO
+  DOING
+  DONE
+}
+
+enum MeetingType {
+  REGULAR // 例会
+  TOPIC // 专题会
+  TEMP // 临时会
+}
+
+enum RecordingSource {
+  UPLOAD
+  BROWSER
+}
+
+enum RecordingStatus {
+  UPLOADING
+  UPLOADED
+  TRANSCRIBING
+  TRANSCRIBED
+  DRAFT_READY
+  CONFIRMED
+  DELETE_PENDING
+  AUDIO_DELETED
+  FAILED
+}
+
+/// 议题状态。攒在池子里 → 被拉进某次会议的议程
+enum AgendaStatus {
+  PENDING
+  SCHEDULED
+}
+
+enum RecurringFreq {
+  WEEKLY
+  MONTHLY
+}
+
+/// prd-routines 2。
+model Task {
+  id       String       @id @default(cuid())
+  title    String
+  source   TaskSource   @default(SELF)
+  /// 保留字段，但单人使用时恒为「我」（prd-routines 5：不做任务指派）
+  assignee String       @default("我")
+  priority TaskPriority @default(NORMAL)
+  status   TaskStatus   @default(TODO)
+
+  /// 截止日。**纯日期**，读写走 lib/date.ts
+  dueDate DateTime? @db.Date
+
+  /// 关联课题。**外键而不是自由文本**——自由文本多打一个字就是两个项目，
+  /// 没法按课题聚合待办，课题详情页的「任务」Tab 也就无从实现
+  relatedProjectId String?
+  relatedProject   Project? @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+
+  note String?
+  /// 自由标签：双高 / 期末 / 迎评…
+  tags String[] @default([])
+
+  /// 由哪次会议的决议转来
+  sourceMeetingId String?
+  sourceMeeting   Meeting? @relation(fields: [sourceMeetingId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  /// 软删除：进回收站，30 天后清理
+  deletedAt   DateTime?
+
+  /// 由哪条速记转来（二期 §6.1）
+  capturedFrom CaptureItem?
+
+  @@index([status, dueDate])
+  @@index([deletedAt])
+  @@index([relatedProjectId])
+}
+
+model Meeting {
+  id          String      @id @default(cuid())
+  title       String
+  /// **带时刻的时间戳**（不是纯日期），显示走 lib/format.ts 的本地时区口径
+  meetingTime DateTime
+  type        MeetingType @default(REGULAR)
+
+  /// 议程条目，开会前从议题池拉进来
+  agenda      Json    @default("[]")
+  /// 纪要正文
+  minutes     String?
+  /// 决议 [{text, assignee, dueDate, convertedTaskId}]，可一键转任务
+  resolutions Json    @default("[]")
+
+  /// 每场会议独立持久化；关闭后录音只留在本机，不允许触发云转写。
+  transcriptionEnabled Boolean            @default(true)
+  recordings            MeetingRecording[]
+
+  agendaItems  AgendaItem[]
+  tasks        Task[]
+  /// 由哪条速记转来（二期 §6.1）
+  capturedFrom CaptureItem?
+
+  createdAt DateTime @default(now())
+
+  @@index([meetingTime])
+}
+
+/// 会议录音使用独立临时根，不复用 Attachment，也不进入长期备份。
+model MeetingRecording {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  source         RecordingSource
+  status         RecordingStatus @default(UPLOADING)
+  originalName   String
+  mimeType       String
+  durationSec    Int?
+  bytes          Int             @default(0)
+  storagePath    String?         @unique
+  chunkCount     Int             @default(0)
+  expectedChunks Int?
+
+  provider       String?
+  providerTaskId String?
+  /// 每条录音独立记录上云知情同意；为空时即使会议后来重新开启转写也不得上云。
+  cloudConsentAt DateTime?
+  attempts       Int       @default(0)
+  claimedAt      DateTime?
+
+  transcript         String?
+  transcriptSegments Json?
+  draftSummary       String?
+  draftDiscussion    String?
+  draftResolutions   Json?
+  draftTasks         Json?
+  draftOpenIssues    Json?
+
+  errorCode      String?
+  errorNote      String?
+  expiresAt      DateTime?
+  confirmedAt    DateTime?
+  audioDeletedAt DateTime?
+
+  ownerId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, expiresAt])
+  @@index([status, claimedAt])
+  @@index([status, createdAt])
+  @@index([meetingId])
+}
+
+/// 议题池。想到一条先攒着，开会时拉进议程——避免临开会前现想
+model AgendaItem {
+  id      String       @id @default(cuid())
+  content String
+  status  AgendaStatus @default(PENDING)
+
+  meetingId String?
+  meeting   Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
+}
+
+/// 周期任务规则：「每周一」「每月 25 号」。
+/// **没有 cron**——首次访问当天页面时补生成，这对单人工具足够
+model RecurringRule {
+  id       String       @id @default(cuid())
+  title    String
+  assignee String       @default("我")
+  source   TaskSource   @default(SELF)
+  priority TaskPriority @default(NORMAL)
+
+  relatedProjectId String?
+  relatedProject   Project? @relation(fields: [relatedProjectId], references: [id], onDelete: SetNull)
+
+  note String?
+  freq RecurringFreq
+  /// WEEKLY: 1-7（周一~周日）；MONTHLY: 1-31（超出当月天数取月末）
+  day  Int
+
+  active     Boolean @default(true)
+  /// 最后生成到哪一天（YYYY-MM-DD）。并发生成靠它做原子认领
+  lastRunYmd String?
+
+  createdAt DateTime @default(now())
+
+  @@index([active])
+}
+
+/// 教师名单，轮派用。
+/// **暂不与将来多账号版的用户表合并**（prd-routines 2）：
+/// 过早抽象会让轮派这个很具体的需求迁就一个通用用户模型
+model Teacher {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  /// false = 暂不参与轮值（如外出进修）
+  active Boolean @default(true)
+
+  createdAt          DateTime           @default(now())
+  dutyParticipations DutyParticipant[]
+  /// 作为合作指导教师参与的参赛记录
+  competitionCoaches CompetitionCoach[]
+}
+
+/// 轮派类型：监考 / 校级会议 / 值班 / 教学质量优秀…（用户自建，字典表不是自由文本）。
+/// **界面叫「轮派」不叫「值班」**：它既管活也管名额，「值班」只是其中一个类型
+model DutyType {
+  id   String  @id @default(cuid())
+  name String  @unique
+  note String?
+
+  createdAt DateTime     @default(now())
+  records   DutyRecord[]
+
+  @@index([name])
+}
+
+model DutyRecord {
+  id         String   @id @default(cuid())
+  dutyTypeId String
+  dutyType   DutyType @relation(fields: [dutyTypeId], references: [id], onDelete: Cascade)
+
+  /// **纯日期**，走 lib/date.ts
+  date  DateTime @db.Date
+  /// 事项说明，如「期末考试监考 第1场」
+  title String
+  note  String?
+
+  createdAt    DateTime          @default(now())
+  participants DutyParticipant[]
+
+  @@index([date])
+  @@index([dutyTypeId])
+}
+
+/// 轮派 ↔ 参与教师。
+///
+/// **显式连接表而不是 Prisma 隐式 m2m**（同 StudentHonorMember、CompetitionCoach）。
+/// 2026-09-12 从隐式改过来，理由是一条沉默的数据缺口：隐式表不是 model，
+/// 全库 JSON 备份的表清单（lib/backup/tables.ts）根本看不见它——
+/// 备份里轮派记录一条不少、参与者却全是空的，**不报任何错**。
+/// 而「这次派了谁、下次该轮到谁」正是这个模块存在的理由，参与者丢了记录就没用了。
+model DutyParticipant {
+  id           String     @id @default(cuid())
+  dutyRecordId String
+  dutyRecord   DutyRecord @relation(fields: [dutyRecordId], references: [id], onDelete: Cascade)
+  teacherId    String
+  teacher      Teacher    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([dutyRecordId, teacherId])
+  @@index([teacherId])
+}
+
+// ─── 班主任（学生工作）────────────────────────────────────────────────
+//
+// 全部属于**个人域**（CLAUDE.md 第 13 条）。学生姓名、家长电话、矛盾关系
+// 比本人履历还敏感，多账号版绝不进台账层。
+//
+// 定位：学校的一站式学生服务平台是判定/审批系统（资助、奖惩、心理、宿舍
+// 都归它管，**这里一概不做、不对接**）；本模块只存它不存的日常工作痕迹——
+// 名册、勾名单收缴、谈话记录、荣誉。可选模块，默认关闭（lib/modules.ts）。
+
+/// 班级。有的老师只带一个班，有的带几个，按表存。
+model ClassGroup {
+  id   String  @id @default(cuid())
+  /// 「智能2201班」
+  name String  @unique
+  note String?
+
+  /// 带完的班归档，不占默认视图但可检索；不删——记录还要留着填材料
+  archivedAt DateTime?
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）。
+  /// 学生、记录、荣誉经 classGroupId 归属，不各自重复占位
+  ownerId String?
+
+  students   Student[]
+  checklists RosterChecklist[]
+  honors     StudentHonor[]
+  records    StudentRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 学生卡片：通讯录 + 备注，不是学籍表。学籍归学校系统管。
+model Student {
+  id           String     @id @default(cuid())
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+
+  name        String
+  /// 学号。不设唯一——存量导入常有缺号，且同班转入生可能暂时没号
+  studentNo   String?
+  phone       String?
+  parentName  String?
+  parentPhone String?
+
+  /// 宿舍号，如「5-302」。**是字段不是模块**：宿舍管理归学校系统，
+  /// 这里只回答「他住哪、跟谁住」。名册页按它分组成宿舍视图
+  dormRoom String?
+
+  /// 实习单位与驻点联系人。班级外出实习时名册的活字段
+  internshipUnit    String?
+  internshipContact String?
+
+  /// 自由备注（「家里单亲，敏感」「想专转本」）。敏感，个人域
+  note String?
+
+  /// false = 已离班（退学/转专业/参军）。不删——历史记录还挂在名下
+  active Boolean @default(true)
+
+  checkmarks         RosterCheckmark[]
+  /// 参加过的比赛（可选关联：参赛名单以姓名文本为准）
+  competitionMembers CompetitionMember[]
+  honorMembers       StudentHonorMember[]
+  recordMembers      StudentRecordMember[]
+  relationsA         StudentRelation[]     @relation("RelationA")
+  relationsB         StudentRelation[]     @relation("RelationB")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classGroupId, active])
+}
+
+/// 学生间的矛盾关系。**一对学生的事实**，写在单个学生备注里会两边抄、
+/// 改一边漏一边。结构化的回报：宿舍视图能对「同屋且未化解」给软提示
+/// （只提示不判定，铁律 1 在人际关系上同样成立）。
+///
+/// 迁移里有 CHECK ("studentAId" < "studentBId")：同一对只有一种写法，
+/// (甲,乙) 和 (乙,甲) 不可能并存，Server Action 写入前先排序两个 id。
+model StudentRelation {
+  id         String  @id @default(cuid())
+  studentAId String
+  studentA   Student @relation("RelationA", fields: [studentAId], references: [id], onDelete: Cascade)
+  studentBId String
+  studentB   Student @relation("RelationB", fields: [studentBId], references: [id], onDelete: Cascade)
+
+  /// 矛盾说明。敏感中的敏感
+  note String
+
+  /// 已化解。不删记录——「他俩以前闹过」在重新分组时仍是有用信息
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([studentAId, studentBId])
+  @@index([studentBId])
+}
+
+/// 勾名单：收回执、收保险单、交问卷这类「收齐没有」。
+/// 微信接龙看的是谁交了，班主任要的是**谁没交**。
+model RosterChecklist {
+  id           String     @id @default(cuid())
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+
+  title   String
+  /// **纯日期**，走 lib/date.ts
+  dueDate DateTime? @db.Date
+  note    String?
+
+  /// 收齐了/不收了，折叠进历史。不删——「上学期保险单收没收过」偶尔要查
+  closedAt DateTime?
+
+  checkmarks RosterCheckmark[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classGroupId, createdAt])
+}
+
+/// 勾名单的一个勾：**有行 = 已交，没有行 = 未交**。
+/// 不预生成全班的行——后转入的学生自动以「未交」出现，不需要补数据
+model RosterCheckmark {
+  id          String          @id @default(cuid())
+  checklistId String
+  checklist   RosterChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  checkedAt DateTime @default(now())
+
+  @@unique([checklistId, studentId])
+  @@index([studentId])
+}
+
+/// 学生/班级荣誉。评优申报时「整理班级荣誉」= 列一张表 + 凑一沓奖状，
+/// 平时随手记进来，用时筛选导出 + 奖状 ZIP。
+///
+/// **与本人成果台账（Achievement）是两份东西，不合并不同步**：
+/// Achievement 里的「学生获奖」是本人当指导老师的绩效事实；这里是这个班
+/// 的学生得过什么，包括别的老师指导的、三好学生、集体荣誉。重叠的那几条
+/// 宁可两边各记一次。将来要打通就照抄教案回流的模式（人工「引用为成果」），
+/// 绝不自动创建。
+model StudentHonor {
+  id           String     @id @default(cuid())
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+
+  /// 「全国职业院校技能大赛一等奖」「校三好学生」
+  title  String
+  /// 复用全局行政级别枚举；UNRATED 界面显示「未定级」
+  level  Level   @default(UNRATED)
+  /// 颁发单位，自由文本。评优表只罗列不按单位统计，暂不上字典
+  issuer String?
+
+  /// 集体荣誉（先进班集体、活力团支部），归属班级、不挂具体学生。
+  /// 个人奖挂一个学生，团体赛挂几个——都走 members
+  isCollective Boolean @default(false)
+
+  /// 获奖日。奖状上常常只有年月甚至只有年份——dateText 存原文、
+  /// datePrecision 标精度，**不许硬转精确日期**（铁律 8）
+  awardedAt     DateTime?     @db.Date
+  dateText      String?
+  datePrecision DatePrecision @default(UNKNOWN)
+
+  note String?
+
+  members     StudentHonorMember[]
+  /// 奖状照片/扫描件
+  attachments Attachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classGroupId, level])
+  @@index([classGroupId, awardedAt])
+}
+
+/// 荣誉 ↔ 学生。0 个 = 集体荣誉，1 个 = 个人奖，多个 = 团体赛。
+/// **显式连接表而不是 Prisma 隐式 m2m**：隐式表不是 model，
+/// 全库 JSON 备份的表清单（lib/backup/tables.ts）会看不见它
+model StudentHonorMember {
+  id        String       @id @default(cuid())
+  honorId   String
+  honor     StudentHonor @relation(fields: [honorId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([honorId, studentId])
+  @@index([studentId])
+}
+
+/// 学生记录类型字典（谈话/班会/事件，可现场添加。第 12 条：字典是表）。
+/// 资助、评优这类**不建**——那是学校平台的词汇表，建了就是在做影子系统
+model StudentRecordType {
+  id   String  @id @default(cuid())
+  name String  @unique
+  note String?
+
+  createdAt DateTime        @default(now())
+  records   StudentRecord[]
+}
+
+/// 学生记录流水：谈话、班会、突发事件、家访电话。
+/// 主入口是顶栏速记（记完在收件箱归类到学生），不是「打开模块填表单」——
+/// 后者和学校平台一个下场：有任务才打开。
+model StudentRecord {
+  id           String     @id @default(cuid())
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+
+  typeId String
+  /// Restrict 不 Cascade：删类型不该连记录一起删（同 DocCategory 的取舍）
+  type   StudentRecordType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  /// 事发日。**纯日期**走 lib/date.ts。老师自己记当天的事，精确到日是常态，
+  /// 不需要 datePrecision 那套——那是给外来的模糊日期准备的
+  date    DateTime @db.Date
+  content String
+
+  members      StudentRecordMember[]
+  /// 由哪条速记转来（同 Task/Achievement/Meeting 的转换指针）
+  capturedFrom CaptureItem?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([classGroupId, date])
+  @@index([typeId])
+}
+
+/// 记录 ↔ 学生。0 个 = 全班范围（班会），1+ 个 = 点名的那几个
+model StudentRecordMember {
+  id        String        @id @default(cuid())
+  recordId  String
+  record    StudentRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, studentId])
+  @@index([studentId])
+}
+
+// ─── 指导参赛（赛事）─────────────────────────────────────────────────
+//
+// 定位：参赛的价值一大半在**出结果之前**——报名截止、集训、比赛日期；
+// 获奖才是成果。所以过程落在这几张表，获奖由人工「引用为成果」写进台账
+// （与教案回流同构，**绝不自动创建**，第 1 条铁律）。
+//
+// **赛段不另建表**：校赛、省赛、国赛各记一条 CompetitionEntry，同一个
+// 「赛事 + 年度」天然聚成晋级路径。理由很硬——证书是按赛段发的，
+// 一张证书对应一条记录，也正好对应台账里的一条成果。
+//
+// 属**个人域**（第 13 条）：参赛学生姓名和班主任模块同级敏感。
+
+/// 赛事字典（第 12 条铁律：字典是表不是自由文本）。
+/// 「全国职业院校技能大赛」多打一个字就会被算成两家，历年统计当场碎。
+model Competition {
+  id String @id @default(cuid())
+
+  /// 「全国职业院校技能大赛」。**不含赛项和届次**——那两样每年变，在 Entry 上
+  name      String  @unique
+  /// 主办单位。自由文本：赛事通知上的写法五花八门，上字典的收益不抵维护成本
+  organizer String?
+  /// 这个赛事**通常**的级别，只当新建参赛记录时的默认值。
+  /// 每条记录自己覆盖——同一个赛事有校赛、省赛、国赛三层
+  level     Level   @default(UNRATED)
+  note      String?
+
+  entries CompetitionEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 参赛走到哪一步。**全部人工标，系统不推**（第 1 条铁律）。
+/// 结果不在这里——看 award：null = 还没出结果或没填，NONE = 参赛了没获奖。
+/// 两个字段各说一件事，不互相推导
+enum CompetitionStatus {
+  PLANNED // 打算参加
+  REGISTERED // 已报名
+  TRAINING // 集训中
+  COMPETED // 已比赛
+  WITHDRAWN // 已放弃
+}
+
+/// 奖项等级。各赛事叫法不一（金/银/铜、一/二/三等），
+/// 枚举只用来筛选和排序，**原文存 awardTitle 照原样显示**
+enum CompetitionAward {
+  FIRST // 一等奖 / 金奖
+  SECOND // 二等奖 / 银奖
+  THIRD // 三等奖 / 铜奖
+  EXCELLENT // 优胜奖 / 优秀奖 / 入围
+  OTHER // 其他名目（单项奖、最佳创意…）
+  NONE // 参赛未获奖。**是一个事实，不是空值**
+}
+
+/// 一次参赛 = 一个赛事的一个赛项的一个赛段。
+model CompetitionEntry {
+  id            String      @id @default(cuid())
+  competitionId String
+  /// Restrict 不 Cascade：删赛事不该把历年参赛记录一起带走（同 DocCategory 的取舍）
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+
+  /// 赛项 / 赛道，「软件测试赛项」。同一赛事同一年可以报好几个
+  track       String?
+  /// 年度。历年分组和统计都靠它，所以必填——届次原文另存 editionText
+  year        Int
+  /// 「第十八届」这类原文。通知上有就存，没有不猜
+  editionText String?
+  /// **本赛段**的级别，校赛一条、省赛一条，各自不同
+  level       Level   @default(UNRATED)
+
+  status CompetitionStatus @default(PLANNED)
+
+  /// 报名截止。**精确到日才填**——它要进首页倒计时和月历，
+  /// 只知道「五月底」就留空、写进 note：给一个看起来精确的错日期更糟（第 8 条铁律）
+  registerDeadline DateTime? @db.Date
+
+  /// 比赛日期。赛事通知常常只写到月份，所以配 dateText + precision 那一套
+  competeAt            DateTime?     @db.Date
+  competeDateText      String?
+  competeDatePrecision DatePrecision @default(UNKNOWN)
+
+  /// 获奖结果。null = 还没出结果或没填；NONE = 参赛了没获奖
+  award              CompetitionAward?
+  /// 奖状原文，「省一等奖」「金奖」。引用为成果时拿它拼标题
+  awardTitle         String?
+  /// 获奖日。奖状上常常只有年月（第 8 条铁律，同 StudentHonor）
+  awardedAt          DateTime?         @db.Date
+  awardDateText      String?
+  awardDatePrecision DatePrecision     @default(UNKNOWN)
+
+  /// 本人是第几指导教师。**绩效和职称都看这个排名**，1 = 第一指导。
+  /// null = 没填，不是「不是指导教师」
+  myOrder Int?
+
+  note String?
+
+  /// 用户点「引用为成果」后才有。**不自动创建**（第 1 条铁律、教案回流先例）
+  achievementId String?
+  achievement   Achievement? @relation(fields: [achievementId], references: [id], onDelete: SetNull)
+
+  members     CompetitionMember[]
+  coaches     CompetitionCoach[]
+  /// 赛事通知、报名表、获奖证书
+  attachments Attachment[]
+
+  /// 预留给将来的多账号版，现在恒为 null（第 13 条）
+  ownerId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([year, level])
+  @@index([competitionId, year])
+  @@index([registerDeadline])
+  @@index([status])
+}
+
+/// 参赛学生。**姓名按文本存，关联是可选的**：参赛学生常常跨班、跨系，
+/// 甚至已经毕业，而班主任模块默认是关的——强行要求关联等于逼着开那个模块。
+model CompetitionMember {
+  id      String           @id @default(cuid())
+  entryId String
+  entry   CompetitionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  /// 姓名原文。**永远是真相**，关联只是锦上添花
+  name       String
+  /// 班主任模块开着、且这名学生在册时可以挂上。
+  /// SetNull 不 Cascade：学生记录删了，参赛名单上的名字还得在
+  studentId  String?
+  student    Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  /// 「队长」「负责答辩」这类
+  note       String?
+  /// 队内次序，证书上的署名顺序
+  orderIndex Int      @default(0)
+
+  @@index([entryId, orderIndex])
+  @@index([studentId])
+}
+
+/// 合作指导教师。**本人不在这张表里**——本人的排名是 entry.myOrder，
+/// 这里只记「和谁一起指导的」。教师名录复用轮派那份字典（Teacher）。
+///
+/// **显式连接表而不是 Prisma 隐式 m2m**：隐式表不是 model，
+/// 全库 JSON 备份的表清单（lib/backup/tables.ts）会看不见它
+model CompetitionCoach {
+  id        String           @id @default(cuid())
+  entryId   String
+  entry     CompetitionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  teacherId String
+  teacher   Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  /// 指导教师署名次序
+  orderIndex Int @default(0)
+
+  @@unique([entryId, teacherId])
+  @@index([teacherId])
+}
+
+// ─── 快速记录收件箱 ──────────────────────────────────────────────────
+
+/// 速记的去处。选错不要紧，收件箱里能改
+enum CaptureKind {
+  TASK // 待办
+  ACHIEVEMENT // 成果线索
+  NOTE // 随记（会议、想法）
+}
+
+enum CaptureStatus {
+  INBOX // 待处理
+  SNOOZED // 延期到某天再出现
+  CONVERTED // 已转成正式记录
+  DISMISSED // 不要了
+}
+
+/// 快速记录（二期规格 §6.1）。
+///
+/// **采集不等于事实**（第一性原理第 1 条）：想到的东西先落这儿，
+/// 完成归类和核实后才进正式台账。未处理的速记**不进任何统计和导出**——
+/// 这正是它独立成表、而不是直接建 Achievement 的理由：正式成果中仍有待核实数据，
+/// 再让随手记的半句话混进台账，成果库就彻底不能信了。
+///
+/// 为什么待办也走这里：不填截止日的 Task 不会出现在首页任何区块
+/// （`todayQueueTasks` 只取逾期/今日到期/高优先级），记完就等于丢了。
+///
+/// 首页上它叫**「收件箱」**，与「今天要处理」（Task 视图）分属两块，
+/// 名字不许混用——两个都叫收件箱，用户会说不清自己记的东西在哪个箱子里。
+model CaptureItem {
+  id     String        @id @default(cuid())
+  kind   CaptureKind   @default(TASK)
+  status CaptureStatus @default(INBOX)
+
+  /// 一句话。这是唯一必填项——超过一句话就不叫快速记录了
+  title   String
+  /// 可选的补充内容
+  content String?
+
+  /// 延期到哪天再出现在收件箱。**纯日期**，读写走 lib/date.ts
+  snoozedUntil DateTime? @db.Date
+
+  /// 转换结果。**四个可空外键，不用多态指针**——数据库约束保不住
+  /// `entityType + entityId` 那种写法，而 @unique 顺带把「重复提交转换」
+  /// 挡在数据库层：同一条速记不可能转出两个实体
+  convertedTaskId          String?        @unique
+  convertedTask            Task?          @relation(fields: [convertedTaskId], references: [id], onDelete: SetNull)
+  convertedAchievementId   String?        @unique
+  convertedAchievement     Achievement?   @relation(fields: [convertedAchievementId], references: [id], onDelete: SetNull)
+  convertedMeetingId       String?        @unique
+  convertedMeeting         Meeting?       @relation(fields: [convertedMeetingId], references: [id], onDelete: SetNull)
+  /// 班主任模块：速记归到某个学生名下的谈话/事件记录
+  convertedStudentRecordId String?        @unique
+  convertedStudentRecord   StudentRecord? @relation(fields: [convertedStudentRecordId], references: [id], onDelete: SetNull)
+
+  /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）
+  ownerId String?
+
+  createdAt DateTime  @default(now())
+  /// 转换、延期或忽略的时间
+  handledAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([status, snoozedUntil])
+}
+
+// ─── 导出审计 ────────────────────────────────────────────────────────
+
+/// 记录「当时实际导出了什么」，而不只记录一组之后可能得出不同结果的参数。
+/// 文件本身不存；snapshot 保存最终表格行和关键字段，可用于事后核对与重建。
+model ExportRun {
+  id            String     @id @default(cuid())
+  /// 防浏览器/代理重放同一次 POST，避免一份导出记成多次
+  requestKey    String?    @unique
+  kind          ExportKind
+  year          Int?
+  projectId     String?
+  options       Json
+  includedCount Int
+  issueSummary  Json
+  snapshot      Json
+  ownerId       String?
+  createdAt     DateTime   @default(now())
+
+  @@index([kind, createdAt])
+  @@index([projectId])
+}

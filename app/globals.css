@@ -1,0 +1,486 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─────────────────────────────────────────────────────────────
+   视觉语言（2026-09-12 改版）：淡青画布 + 纯白卡片 + 淡描边 +
+   14px 圆角 + 青绿主色 + 功能配彩色图标。
+
+   **为什么推翻上一版的墨黑极简**：目标用户从"作者自己"变成了
+   "别的老师"。老师判断"这是不是个正经系统"的参照物是教务系统、
+   学习通、政务 OA——淡彩底 + 左侧竖排导航 + 彩色功能图标是他们的锚点。
+   墨黑极简在设计圈叫克制，在这个人群里容易读成"没做完"。
+
+   色值不是现调的，是样张里逐屏验过的（见 docs/ui-shots/）。
+
+   ── 三层颜色，各管各的，永远不许互相借用 ──────────────────
+
+   1. **主色（--primary 青绿）**：导航激活、主按钮、链接、强调数字。
+      全站只有一个主色。
+
+   2. **装饰色板（--decor-*）**：功能图标的底片。
+      **形态锁死：淡底 11~15% + 线性描边图标，永不实心、永不带语义。**
+
+   3. **语义色板（--h-*）**：只有 components/health.tsx 能用。
+      **形态锁死：实心高饱和圆点 + 文字标签 + 胶囊底，三者同时出现。**
+
+   装饰色板和语义色板的色相**必然重叠**（可用色相就那么多），这是设计
+   的前提不是 bug——区分靠形态不靠色相：装饰是"一片染了色的玻璃"，
+   语义是"一颗实心的灯"，亮度差比色相差更早被眼睛抓到。
+   再加一道保险：**健康度的文字标签永远在**，色弱和黑白打印都读得出来。
+
+   分类标记（纵向/横向、科研/教改、省级/校级、论文/专利）**一律无色**。
+   它们是正交维度不是状态；一条成果同时挂三四个维度，各给一个颜色，
+   一行里就有四种色，谁也看不出哪个重要。
+
+   ── 深色：不是把浅色反过来 ────────────────────────────────
+
+   定案「近黑底 + 雾面强调色」。三条和浅色反着来的规矩，
+   改版过程中三条全踩过一遍：
+
+   1. **画布中性，不跟主色走。** 浅色画布带一点青是"纸的凉意"；
+      同样的色相放到近黑上就是一层泥（青绿会变墨绿）。
+   2. **--well 在深色下要比卡片亮，不是暗。** 浅色的 well 是凹槽
+      （比白卡暗），直译到深色就成了一个洞。改成半透明白，叠在卡片上
+      和画布上都自然提亮，一份定义两处都对。
+   3. **边只画一层。** 卡片已有 1px border，阴影里再写 `0 0 0 1px`
+      就是两条边叠着画，看起来每张卡都糊了一圈。深色的阴影只留落影。
+
+   强调色在深色下**统一降饱和到雾面**。近黑底配 Tailwind 400 级原色
+   会有霓虹感，白天看尤其扎眼。
+   ───────────────────────────────────────────────────────────── */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  /* 拉丁字母与数字走 Geist，汉字回落到系统自带的中文字体，
+     避免为几千个汉字字形拉一份 Web Font。 */
+  --font-sans:
+    var(--font-geist-sans), "PingFang SC", "HarmonyOS Sans SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono:
+    var(--font-geist-mono), "PingFang SC", "Microsoft YaHei", monospace;
+  --font-heading: var(--font-sans);
+  /* 展示层衬线**只剩两处**：登录页大标题、顶栏字标。
+     改版前它还管着 .page-title 和首页大数字，现在那两处改成无衬线 800——
+     参考的那几张图里标题全是无衬线粗体，而衬线大字在界面里铺开就
+     不再是身份，只是"又一种字体"。留这两处是为了让登录那一眼还认得出是谁。
+     字体在 app/layout.tsx 里按 unicode-range 分片加载（@fontsource/noto-serif-sc），
+     **只加载了 900 字重**，font-black 以外的字重会落到合成加粗、笔画糊掉。 */
+  --font-serif:
+    "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  /* 中间调面板（bg-well）：画布和纯白卡片之间的第三档明度。
+     只装「虚」的东西：托盘、空状态、图标圆片、未选中的筛选胶囊、
+     表头、空的课表槽。**正式内容仍然放白卡上。**
+     深色下它是半透明白（见上面第 2 条），不要为深色单独写色值。 */
+  --color-well: var(--well);
+
+  /* 圆角从 22px 收到 14px。22px 是上一版参照房产 CRM 定的，
+     那种卡片墙里大圆角是气质；这版是密集列表 + 表格，14px 才不显得肉。
+     --radius 本身就是卡片圆角，别再往上乘系数。 */
+  --radius-sm: calc(var(--radius) * 0.42);
+  --radius-md: calc(var(--radius) * 0.58);
+  --radius-lg: calc(var(--radius) * 0.72);
+  --radius-xl: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.15);
+  --radius-3xl: calc(var(--radius) * 1.3);
+  --radius-4xl: calc(var(--radius) * 1.5);
+
+  /* 卡片：浅色 1px 淡描边 + 极淡弥散阴影，深色 1px 描边 + 落影。
+     具体值在下面 :root / .dark 各给一份，这里只做转发。 */
+  --shadow-card: var(--card-shadow);
+  --shadow-card-hover: var(--card-shadow-hover);
+  --shadow-pill: var(--pill-shadow);
+
+  /* 成段文字的行长上限，见下面的 .measure。
+     注册在 @theme 里是为了同时得到 `max-w-measure` 这个 utility——
+     `.measure` 是组件层的类，写进 `[&>p]:…` 这种变体里不会生成任何东西。 */
+  --container-measure: 42rem;
+}
+
+:root {
+  --radius: 0.875rem; /* 14px */
+  /* 侧栏展开宽度。收起态在文件下方的 :root[data-sidebar="collapsed"] 里覆盖，
+     那条必须留在 @layer 之外（理由见那里）；但这个默认值要跟主令牌住一起——
+     lib/design-contract.test.ts 只解析**第一个** :root 块，
+     拆出去的令牌它提取不到，契约门禁会说"契约里有源头没有的令牌" */
+  --sidebar-w: 13.375rem; /* 214px */
+  /* 顶栏高度（含下边框，border-box）。长列表的表头吸顶要贴在它下沿，
+     **那几处一律写 top-[var(--topbar-h)]，不要再写死像素**——
+     改版前散落着 top-[72px] / top-[76px] 三处，顶栏一改高度就全错位，
+     而错位的表现只是表头和内容差几像素，没人会当成 bug 报上来 */
+  --topbar-h: 3.5rem; /* 56px */
+  color-scheme: light;
+
+  /* 浅色：卡片有一层极淡描边 + 弥散阴影。
+     上一版是「不描边只靠阴影」，那是白卡浮在象牙底上的打法；
+     现在画布和卡片的色差更小，光靠阴影卡片边界会糊。 */
+  --card-shadow:
+    0 1px 2px rgb(16 30 28 / 4%), 0 8px 20px -14px rgb(16 30 28 / 16%);
+  --card-shadow-hover:
+    0 1px 3px rgb(16 30 28 / 6%), 0 14px 30px -16px rgb(16 30 28 / 22%);
+  --pill-shadow: 0 1px 2px rgb(16 30 28 / 4%);
+
+  /* 画布是**带一点青的淡灰**，卡片纯白。色相跟着主色走——
+     这是参考的那几张图里每套配色都有的性质：底色是主色兑了 95% 的白。 */
+  --background: #f3f6f5;
+  --foreground: #17201f;
+
+  --card: #ffffff;
+  --card-foreground: #17201f;
+  --popover: #ffffff;
+  --popover-foreground: #17201f;
+
+  /* 中间调（用途见 @theme 里 --color-well 的注释） */
+  --well: #edf2f1;
+
+  /* 品牌主色：青绿。
+     **为什么不是绿**：翠绿被健康度的「已齐备」占着。青绿（色相 180）
+     和翠绿（色相 160）差了 20 度，配合形态区分（主色只出现在导航激活、
+     按钮、链接上，从不做成"实心圆点 + 文字"）足够分开。
+     换主色前先看一眼还剩什么色能用：红/橙/琥珀/翠绿/天蓝/紫罗兰
+     全被健康度占了。 */
+  --primary: #0e9384;
+  --primary-foreground: #ffffff;
+
+  --secondary: #eef3f2;
+  --secondary-foreground: #1e2928;
+  --muted: #eef3f2;
+  --muted-foreground: #65756f;
+  --accent: #e3f4f1;
+  --accent-foreground: #0b7a6d;
+
+  --destructive: #dc2626;
+
+  --border: #e4eae9;
+  --input: #dde5e3;
+  --ring: #0e9384;
+
+  /* 图表用色：主色的深浅 + 两档中性。
+     **不要往这里塞健康度那六个色相**——图表是装饰层。 */
+  --chart-1: #0e9384;
+  --chart-2: #5cc5b8;
+  --chart-3: #9ad8cf;
+  --chart-4: #64748b;
+  --chart-5: #cbd5e1;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #17201f;
+  --sidebar-primary: #0e9384;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e3f4f1;
+  --sidebar-accent-foreground: #0b7a6d;
+  --sidebar-border: #e4eae9;
+  --sidebar-ring: #0e9384;
+
+  /* ── 装饰色板：功能图标的底片 ──────────────────────────
+     形态锁死：淡底 + 线性描边图标。永不实心、永不承载语义。
+     谁用：统计卡的图标圆片、列表行的类型图标、空状态插画。 */
+  --decor-blue: #3b82f6;
+  --decor-blue-bg: rgb(59 130 246 / 11%);
+  --decor-violet: #8b5cf6;
+  --decor-violet-bg: rgb(139 92 246 / 11%);
+  --decor-amber: #f59e0b;
+  --decor-amber-bg: rgb(245 158 11 / 13%);
+  --decor-rose: #f43f5e;
+  --decor-rose-bg: rgb(244 63 94 / 11%);
+  --decor-teal: #14b8a6;
+  --decor-teal-bg: rgb(20 184 166 / 12%);
+
+  /* ── 语义色板：只有 components/health.tsx 能用 ──────────
+     形态锁死：实心圆点 + 文字标签 + 胶囊底。
+     浅色下不需要内环（白卡上淡底自己就托得住），深色下才加。 */
+  --badge-ring: transparent;
+  --h-red: #e11d48;    --h-red-bg: #ffe9ee;    --h-red-fg: #a8102f;
+  --h-orange: #ea580c; --h-orange-bg: #ffede2; --h-orange-fg: #9a3a08;
+  --h-amber: #ca8a04;  --h-amber-bg: #fcf3d6;  --h-amber-fg: #7c5504;
+  --h-green: #059669;  --h-green-bg: #dcf5ec;  --h-green-fg: #036148;
+  --h-blue: #0284c7;   --h-blue-bg: #e0f1fc;   --h-blue-fg: #01587f;
+  --h-violet: #7c3aed; --h-violet-bg: #efe9fe; --h-violet-fg: #5723ac;
+  --h-grey: #94a3b8;   --h-grey-bg: #eff1f4;   --h-grey-fg: #57616f;
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* 深色只有落影，没有「0 0 0 1px」那层——卡片自己有 border，
+     两层边叠着画会让每张卡都糊一圈（见文件头第 3 条）。 */
+  --card-shadow: 0 12px 28px -22px rgb(0 0 0 / 90%);
+  --card-shadow-hover: 0 16px 34px -20px rgb(0 0 0 / 95%);
+  --pill-shadow: none;
+
+  /* 近黑，中性，**不带主色色相**（见文件头第 1 条）。
+     留一丝冷调（色相偏 200）是为了不成为一块死黑的塑料。 */
+  --background: #0b0e0f;
+  --foreground: #e9eef0;
+
+  --card: #171b1d;
+  --card-foreground: #e9eef0;
+  /* 浮层必须不透明：下拉盖在表格上，透明会把下面的行漏上来 */
+  --popover: #1c2124;
+  --popover-foreground: #e9eef0;
+
+  /* **半透明白，不是一个更暗的实色**（见文件头第 2 条）。
+     叠在卡片上提亮、叠在画布上也提亮，一份定义两处都对。 */
+  --well: rgb(255 255 255 / 6%);
+
+  /* 主色降到雾面：近黑底上 Tailwind 400 级的青绿会有霓虹感 */
+  --primary: #5cc5b8;
+  --primary-foreground: #08211e;
+
+  --secondary: rgb(255 255 255 / 8%);
+  --secondary-foreground: #e9eef0;
+  --muted: rgb(255 255 255 / 8%);
+  --muted-foreground: #99a3a8;
+  --accent: rgb(92 197 184 / 14%);
+  --accent-foreground: #8ad9cf;
+
+  --destructive: #e08d9d;
+
+  --border: #262c2f;
+  --input: #333b3f;
+  --ring: #5cc5b8;
+
+  --chart-1: #5cc5b8;
+  --chart-2: #8ad9cf;
+  --chart-3: #b7e7e0;
+  --chart-4: #7d8a92;
+  --chart-5: #444e54;
+
+  --sidebar: #101314;
+  --sidebar-foreground: #e9eef0;
+  --sidebar-primary: #5cc5b8;
+  --sidebar-primary-foreground: #08211e;
+  --sidebar-accent: rgb(92 197 184 / 14%);
+  --sidebar-accent-foreground: #8ad9cf;
+  --sidebar-border: #262c2f;
+  --sidebar-ring: #5cc5b8;
+
+  /* 装饰色板：雾面版。底片透明度略抬（近黑上 11% 看不见） */
+  --decor-blue: #86abdb;
+  --decor-blue-bg: rgb(134 171 219 / 15%);
+  --decor-violet: #a99bd4;
+  --decor-violet-bg: rgb(169 155 212 / 15%);
+  --decor-amber: #d9b86a;
+  --decor-amber-bg: rgb(217 184 106 / 15%);
+  --decor-rose: #e08d9d;
+  --decor-rose-bg: rgb(224 141 157 / 15%);
+  --decor-teal: #7cc9bf;
+  --decor-teal-bg: rgb(124 201 191 / 15%);
+
+  /* 语义色板：雾面版 + 同色内环。
+     内环不能省：深色下淡底和卡片的亮度差被压扁了，
+     没有环的话徽章边界会化在卡片里。 */
+  --badge-ring: currentColor;
+  --h-red: #e08d9d;    --h-red-bg: rgb(224 141 157 / 16%);  --h-red-fg: #efb3be;
+  --h-orange: #dfa277; --h-orange-bg: rgb(223 162 119 / 16%); --h-orange-fg: #edc3a3;
+  --h-amber: #d4b76b;  --h-amber-bg: rgb(212 183 107 / 16%);  --h-amber-fg: #e6d298;
+  --h-green: #71c3a4;  --h-green-bg: rgb(113 195 164 / 16%);  --h-green-fg: #9bd8c1;
+  --h-blue: #80b5d6;   --h-blue-bg: rgb(128 181 214 / 16%);   --h-blue-fg: #a8cfe6;
+  --h-violet: #a99bd4; --h-violet-bg: rgb(169 155 212 / 16%); --h-violet-fg: #c5bbe4;
+  --h-grey: #97a0a8;   --h-grey-bg: rgb(151 160 168 / 14%);   --h-grey-fg: #bfc6cc;
+}
+
+/* ─── 侧栏收起态 ─────────────────────────────────────────────
+   宽度和文字显隐**全部由这几条 CSS 决定，不经过 React state**。
+   `<html data-sidebar="collapsed">` 由 app/(app)/layout.tsx 里的内联脚本
+   在水合前写好，所以收起过的人进任何一页都不会看见侧栏从 214px 弹到 66px。
+
+   **刻意写在 @layer 之外。** Tailwind v4 里 utilities 层永远赢过 components
+   层（layer 顺序压过特异性），而 .side-item 上带着 px-2.5 这种 utility——
+   同样的规则写进 @layer components，padding 那两行一个字都不会生效。
+   无层样式的优先级高于所有层，这里要的正是它。
+   ───────────────────────────────────────────────────────────── */
+:root[data-sidebar="collapsed"] {
+  --sidebar-w: 4.125rem; /* 66px，只剩图标 */
+}
+:root[data-sidebar="collapsed"] .side-label {
+  display: none;
+}
+:root[data-sidebar="collapsed"] .side-brand {
+  flex-direction: column;
+  gap: 0.5rem;
+}
+:root[data-sidebar="collapsed"] .side-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 一个图标两种朝向，收起时转半圈——比渲染两个图标再切显隐稳，
+   后者在服务端渲染时两个都在 DOM 里，收起态会先闪一下错的那个 */
+:root[data-sidebar="collapsed"] .side-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* 窄屏（768–1023px，平板和小窗口）强制图标栏。
+   **这不是「列表页自动收起」那条被否掉的聪明行为**，是响应式必需：
+   214px 的侧栏在 800px 的窗口里占 27%。
+
+   **< 768px 的手机上侧栏整个隐藏**，改用底部导航 + 顶栏菜单（components/mobile-nav.tsx）。
+   第一版曾让手机也用这个 66px 图标栏，Codex 评审指出它占掉 17% 屏宽、还把全部文字
+   藏了——七个认不全的图标竖着一排，不如底栏五个带字的格子。
+
+   声明和上面那组收起规则重复了一遍——媒体查询没法和属性选择器并进同一个
+   选择器列表。别为了去重把它们抽成变量：那要多四个变量，比重复五行更难读。 */
+@media (max-width: 1023px) {
+  :root {
+    --sidebar-w: 4.125rem;
+  }
+  .side-label {
+    display: none;
+  }
+  .side-brand {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .side-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* 窄屏下展开没有意义，藏掉开关免得点了像没反应 */
+  .side-toggle {
+    display: none;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* 普通链接的键盘焦点态：全站同一个环，不再是浏览器各自的默认蓝框。
+     Button 一族自带 outline-none + focus-visible:ring，不受这里影响 */
+  a:focus-visible {
+    @apply rounded-sm outline-2 outline-offset-2;
+  }
+  html {
+    @apply font-sans;
+    /* 表单一律用原生控件（CLAUDE.md 代码约定），
+       accent-color 是唯一能让复选框跟随品牌色的口子。 */
+    accent-color: var(--primary);
+  }
+}
+
+@layer components {
+  /* 卡片：14px 圆角 + 1px 淡描边 + 阴影。两套主题的差别全在
+     --card-shadow / --border 里，这里一份定义通吃。全站卡片统一走它。
+
+     注意：Tailwind v4 不能 `@apply` 同层里自定义的类，
+     所以 surface-interactive 只能把属性抄一遍，不能 @apply surface。 */
+  .surface {
+    @apply rounded-xl border bg-card text-card-foreground;
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-interactive {
+    @apply rounded-xl border bg-card text-card-foreground transition-shadow duration-200;
+    box-shadow: var(--shadow-card);
+  }
+  .surface-interactive:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* 页面标题。**改版后不再是衬线**——参考的那几张图里标题全是
+     无衬线粗体，衬线大字铺满全站就不再是身份，只是又一种字体。
+     衬线现在只剩登录页标题和顶栏字标两处。
+     字号也从 4xl/5xl 收到 3xl/4xl：上一版是卡片墙，标题大是气质；
+     这版每页标题下面紧跟着筛选条和密集表格，太大会把内容顶下去。 */
+  .page-title {
+    @apply text-3xl leading-[1.15] font-extrabold tracking-[-0.025em] text-balance sm:text-4xl;
+  }
+
+  /* 健康度徽章的形状。**只有 components/health.tsx 用它。**
+     内环走 --badge-ring：浅色下是 transparent（白卡上淡底自己托得住），
+     深色下是 currentColor（淡底和卡片的亮度差被压扁了，得把边界描回来）。
+     写成 token 而不是写进 .dark 块里的规则——颜色只在一个主题下有定义，
+     是深色最典型的翻车方式。 */
+  .health-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--badge-ring) 26%, transparent);
+  }
+
+  /* 二级导航的 tab（日常 / 成果 / 班主任 三处共用）。
+     做成**下划线而不是又一排胶囊**：它下面紧接着往往就是筛选胶囊
+     （成果页有四十多个），两排胶囊叠在一起分不出哪排是"换页面"、
+     哪排是"筛当前这个列表"。
+
+     高亮走 `aria-current` 而不是再传一个 className——那个属性本来就必须设，
+     让它顺便承担样式，两处状态就不可能对不上。 */
+  .subtab {
+    @apply shrink-0 border-b-2 border-transparent px-3.5 py-2 text-sm whitespace-nowrap text-muted-foreground transition-colors;
+    /* 压住容器那条 border-b，选中的下划线才和它连成一条 */
+    margin-bottom: -1px;
+  }
+  .subtab:hover {
+    @apply text-foreground;
+  }
+  .subtab[aria-current="page"] {
+    @apply border-primary font-semibold text-primary;
+  }
+
+  /* 首页问候带（components/home-greeting.tsx）。全站只此一处。
+     底色是主色兑进卡片色 6%、描边 14%——比白卡多一丝青、比 --accent 淡得多：
+     它下面紧挨着那张主色实心的数字卡，底色再浓两块青就叠在一起了。
+     用 color-mix 兑 --card 而不是写死色值，深色下自动变成近黑卡片上的一层雾青。
+     **别拿它当通用的「高亮卡片」**：一页里出现两条这种带子，哪条都不再是焦点。 */
+  .greeting-band {
+    @apply relative overflow-hidden rounded-xl border px-5 py-5 sm:px-7 sm:py-6;
+    background: color-mix(in srgb, var(--primary) 6%, var(--card));
+    border-color: color-mix(in srgb, var(--primary) 14%, transparent);
+  }
+
+  /* 装饰图标的圆片。淡底 + 线性图标，**永远成对出现**：
+     用 .ico-tile 就必须给 --tile 和 --tile-bg（取自 --decor-*）。
+     这是装饰层的唯一入口，别在别处手搓一个彩色方块。 */
+  .ico-tile {
+    @apply grid size-8 shrink-0 place-items-center rounded-lg;
+    background: var(--tile-bg);
+    color: var(--tile);
+  }
+
+  /* 成段文字的行长上限。**说明文字不许铺满内容区**——
+     1280px 宽的一行装得下 89 个汉字，眼睛折回行首时找不到下一行在哪，
+     读两句就会串行。42rem 换算下来：16px 约 42 字、14px 约 48 字。
+
+     只给「读的」文字用：页面副标题、卡片里的说明段落、空态提示。
+     表格行、徽章行、任务行这些是「扫的」，它们本来就该占满宽度。
+
+     需要写进变体（`[&>p]:…`）时用 `max-w-measure`，同一个值。 */
+  .measure {
+    max-width: var(--container-measure);
+  }
+}

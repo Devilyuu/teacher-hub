@@ -1,0 +1,31 @@
+node_modules
+.next
+.git
+.github
+data
+coverage
+.env*
+*.log
+
+# 文档与真实履历，不进镜像
+docs
+deploy
+PRD.md
+BUILD_PLAN.md
+PROJECT_STATUS.md
+CLAUDE.md
+AGENTS.md
+README.md
+索引样式
+
+# 编辑器 / agent 配置
+.vscode
+.idea
+.claude
+.agents
+.windsurf
+
+# Prisma Client 是生成产物，**不能进构建上下文**：COPY . . 会用它覆盖
+# 构建期刚按当前 schema 生成的那份，新增模型时就会报
+# `Property 'xxx' does not exist on type 'PrismaClient'`。
+lib/generated

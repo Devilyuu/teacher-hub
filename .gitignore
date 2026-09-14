@@ -1,0 +1,66 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+.next/
+out/
+build/
+dist/
+
+# 环境变量（含数据库密码、口令、AI API Key）
+.env*
+!.env.example
+# 演示环境的模板。真正的 .env.demo 仍然被上面的 .env* 挡住，
+# 只有这份不含任何真实值的样例入库
+!.env.demo.example
+
+# 运行时数据卷，整个目录都不入库。
+# 里面有：uploads（附件原件）、postgres（数据库卷）、
+# caddy（**TLS 私钥与 ACME 账户密钥**）、caddy-config。
+# 这里刻意用整目录而不是逐个列子目录——加新服务时忘了补一行，
+# 就可能把密钥提交上去，而这个错误是不可撤销的
+/data/
+
+# Next.js 生成
+next-env.d.ts
+.vercel
+
+# 日志与缓存
+*.log
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+*.tsbuildinfo
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 测试覆盖率
+/coverage
+playwright-report/
+test-results/
+# 本地迁移盘点结果含数据库实体 ID；脚本可随时重算，不入库
+/output/migrations/*.json
+# 视觉伴侣的临时线框图与交互事件
+/.superpowers/
+# 附件测试的临时上传目录
+/test/.tmp-uploads/
+
+# Prisma 生成物（npx prisma generate 可重建）
+/lib/generated/
+
+# Prisma init 拉下来的第三方 skills（skills-lock.json 已入库，可重建）
+/.agents/
+/.windsurf/
+/.claude/skills/
+.worktrees/
+
+# 开源导出器的目录标记
+/.public-export

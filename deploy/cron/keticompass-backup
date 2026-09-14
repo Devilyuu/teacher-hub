@@ -1,0 +1,5 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 每天 03:20 备份数据库和附件，脚本内部滚动保留 14 份。
+20 3 * * * ubuntu cd /opt/keticompass && BACKUP_DIR=/opt/keticompass-backups bash scripts/backup.sh >> /var/log/keticompass-backup.log 2>&1
