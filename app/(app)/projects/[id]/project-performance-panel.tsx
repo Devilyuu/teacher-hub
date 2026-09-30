@@ -168,7 +168,11 @@ export function ProjectPerformancePanel({
   const scoreError = state.fieldErrors?.declaredScore?.[0];
 
   return (
-    <section className="surface space-y-4 p-5">
+    // id 是成果页「还没登记绩效事项的课题」名单的落点；顶栏吸顶，得让出它的高度
+    <section
+      id="performance"
+      className="surface scroll-mt-[calc(var(--topbar-h)+1rem)] space-y-4 p-5"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-sm font-medium">课题绩效事项</h2>
@@ -217,7 +221,15 @@ export function ProjectPerformancePanel({
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-muted-foreground">尚未记录课题绩效事项。</p>
+        // 只说系统的事实和后果，不替人登记，也**不替学校的规则下断言**：
+        // 「申报有没有分、几分」在规则原文里，横向课题的基本分就是按到账算的
+        // （CLAUDE.md 第 1、11 条）
+        <p className="measure text-sm text-muted-foreground">
+          尚未记录课题绩效事项，所以这个课题在成果页的「绩效口径」下不会出现。
+          {suggestedKind === "APPLY"
+            ? "申报过的课题，没中也一样，要在这里登记一条「申报」事项才会计入；分值对照规则原文填。"
+            : null}
+        </p>
       )}
 
       {rules.length === 0 ? (

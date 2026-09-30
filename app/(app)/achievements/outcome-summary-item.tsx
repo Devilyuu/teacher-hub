@@ -10,6 +10,7 @@ import {
   type OutcomeFilters,
   sumNumericScore,
 } from "@/lib/outcomes/filters";
+import type { PerformanceEntryGroup } from "@/lib/outcomes/grouping";
 import type { UnifiedOutcomeRow } from "@/lib/outcomes/types";
 import {
   displayOutcomeYears,
@@ -37,13 +38,21 @@ export function OutcomeSummaryItem({
   scope,
   currentOutcomePath,
   filters,
+  entryGroup,
 }: {
   row: UnifiedOutcomeRow;
   scope: LedgerScope;
   currentOutcomePath: string;
   filters: Pick<OutcomeFilters, "year" | "major" | "minor" | "unverifiedOnly">;
+  /** 列表分组时这一行所在的组，见 lib/outcomes/grouping.ts */
+  entryGroup?: PerformanceEntryGroup | null;
 }) {
-  const view = outcomeRowViewModel(row, { scope, currentOutcomePath, filters });
+  const view = outcomeRowViewModel(row, {
+    scope,
+    currentOutcomePath,
+    filters,
+    entryGroup,
+  });
   const promotion = scope === "promotion";
   const { yearText } = outcomeTimeText(row, view.performanceEntries, promotion);
 

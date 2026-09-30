@@ -5,10 +5,8 @@ import { z } from "zod";
 import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
 import { IDLE_FORM_STATE, toFormState, type FormState } from "@/lib/form-state";
-import {
-  PROJECT_PERF_MINORS,
-  projectPerformanceDraft,
-} from "@/lib/project-performance";
+import { projectEligibleOf } from "@/lib/project-eligibility";
+import { projectPerformanceDraft } from "@/lib/project-performance";
 import { projectPerformanceFormSchema } from "@/lib/schemas/project-performance";
 import { requireSession } from "@/lib/server-auth";
 
@@ -62,15 +60,15 @@ export async function createProjectPerformanceEvent(
         return { ok: false, message: "当前没有可用的绩效分类" } as const;
       }
 
-      const category = await tx.perfCategory.findFirst({
-        where: {
-          id: parsed.data.perfCategoryId,
-          year: currentRules.year,
-          isActive: true,
-          minorCategory: { in: [...PROJECT_PERF_MINORS] },
-        },
-        select: { id: true },
-      });
+      // 候选口径和界面下拉是同一个函数（getProjectPerformanceRules）：
+      // 当前年度、启用中、勾了「课题可挂」的；一项都没勾时是全部启用中的
+      const candidates = projectEligibleOf(
+        await tx.perfCategory.findMany({
+          where: { year: currentRules.year, isActive: true },
+          select: { id: true, projectEligible: true },
+        }),
+      );
+      const category = candidates.find((row) => row.id === parsed.data.perfCategoryId);
       if (!category) {
         return {
           ok: false,

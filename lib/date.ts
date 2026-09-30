@@ -34,6 +34,15 @@ export function diffInDays(later: Date, earlier: Date): number {
 }
 
 /**
+ * 纯日期还没过去（今天算在内）。截止日、任务到期日的「加到日历」只对这种日期显示——
+ * 过去的日期加进手机，两条提醒都已经错过了。
+ * `today` 做成参数：组件渲染里不许直接 `new Date()`（react-hooks/purity）
+ */
+export function isTodayOrLater(value: Date, today: Date = todayAsDateOnly()): boolean {
+  return diffInDays(value, today) >= 0;
+}
+
+/**
  * 格式化纯日期为 YYYY-MM-DD。
  * 这里不能用 date-fns 的 `format`——它按本地时区取年月日，
  * 会把 UTC 午夜的 2026-09-30 在西半球渲染成 09-29。

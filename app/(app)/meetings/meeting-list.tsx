@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { IDLE_FORM_STATE, formMessageClass } from "@/lib/form-state";
 import { MEETING_TYPE_LABELS } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 import { createAgendaItem, createMeeting, deleteAgendaItem } from "./actions";
 import type { MeetingType } from "@/lib/generated/prisma/enums";
 
@@ -23,6 +24,8 @@ export type MeetingRow = {
   agendaCount: number;
   pendingResolutions: number;
   taskCount: number;
+  /** 开过了、且决议都派下去了。调淡的判据是它，不是「开过了」（lib/meetings.ts） */
+  settled: boolean;
 };
 
 export type PoolItem = { id: string; content: string };
@@ -39,12 +42,65 @@ function SubmitButton({ label }: { label: string }) {
   );
 }
 
+/**
+ * 分段标题。和成果台账的组标题同一套语言：well 底、加粗、条数跟在后面
+ * （CLAUDE.md 视觉语言——well 只装「虚」的东西，分段标题正是）。
+ */
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <li className="flex items-baseline gap-2 bg-well px-4 py-2">
+      <span className="text-sm font-semibold text-foreground">{label}</span>
+      <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+    </li>
+  );
+}
+
+function MeetingItem({
+  meeting,
+  time,
+}: {
+  meeting: MeetingRow;
+  time: string;
+}) {
+  return (
+    // 整行调淡是「已归档」这类状态的既有写法（已归档课题 opacity-60、已离班学生
+    // opacity-50），也是「文字不许叠透明度」那条明文列出的例外。
+    // **但只淡已结清的**：下面那条琥珀提醒只会长在开过的会上，
+    // 而它是这个模块最该喊的一句——按「开过就淡」会把它一起压暗
+    <li className={cn("px-4 py-3", meeting.settled && "opacity-60")}>
+      <Link
+        href={`/meetings/${meeting.id}`}
+        className="text-sm font-medium underline-offset-4 hover:underline"
+      >
+        {meeting.title}
+      </Link>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="rounded border px-1.5 py-0.5">
+          {MEETING_TYPE_LABELS[meeting.type]}
+        </span>
+        <span className="tabular-nums">{time}</span>
+        {meeting.agendaCount > 0 ? <span>议程 {meeting.agendaCount} 项</span> : null}
+        {meeting.hasMinutes ? <span>已写纪要</span> : null}
+        {meeting.taskCount > 0 ? <span>派生任务 {meeting.taskCount}</span> : null}
+        {/* 开完会决议躺在纪要里没派下去，是这个模块最该提醒的事 */}
+        {meeting.pendingResolutions > 0 ? (
+          <span className="text-[var(--h-amber-fg)]">
+            {meeting.pendingResolutions} 条决议未转任务
+          </span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
 export function MeetingList({
-  meetings,
+  upcoming,
+  past,
   pool,
   formatTime,
 }: {
-  meetings: MeetingRow[];
+  upcoming: MeetingRow[];
+  past: MeetingRow[];
   pool: PoolItem[];
   /** 时间在服务端格式化好传进来，客户端不重复一套时区逻辑 */
   formatTime: Record<string, string>;
@@ -128,8 +184,10 @@ export function MeetingList({
         )}
 
         {/* 整组一张卡、行间只有分隔线（CLAUDE.md：一条记录不是一张卡片）。
-            原来九次会议就是九张各自浮起的大白卡 */}
-        {meetings.length === 0 ? (
+            原来九次会议就是九张各自浮起的大白卡。
+            **两段合用一张卡**，靠 well 底的分段标题隔开——每段各一张卡的话，
+            只有一场会的「即将召开」会独占一张和下面同样大的卡 */}
+        {upcoming.length === 0 && past.length === 0 ? (
           <div className="flex flex-col items-center gap-3 rounded-3xl bg-well p-12 text-center">
             <ClearCalendarArt className="size-12 text-muted-foreground/60" />
             <p className="text-sm text-muted-foreground">
@@ -137,35 +195,26 @@ export function MeetingList({
             </p>
           </div>
         ) : (
-          <ul className="surface divide-y divide-border/50 overflow-hidden py-1">
-            {meetings.map((meeting) => (
-              <li key={meeting.id} className="px-4 py-3">
-                <Link
-                  href={`/meetings/${meeting.id}`}
-                  className="text-sm font-medium underline-offset-4 hover:underline"
-                >
-                  {meeting.title}
-                </Link>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span className="rounded border px-1.5 py-0.5">
-                    {MEETING_TYPE_LABELS[meeting.type]}
-                  </span>
-                  <span className="tabular-nums">{formatTime[meeting.id]}</span>
-                  {meeting.agendaCount > 0 ? (
-                    <span>议程 {meeting.agendaCount} 项</span>
-                  ) : null}
-                  {meeting.hasMinutes ? <span>已写纪要</span> : null}
-                  {meeting.taskCount > 0 ? (
-                    <span>派生任务 {meeting.taskCount}</span>
-                  ) : null}
-                  {/* 开完会决议躺在纪要里没派下去，是这个模块最该提醒的事 */}
-                  {meeting.pendingResolutions > 0 ? (
-                    <span className="text-[var(--h-amber-fg)]">
-                      {meeting.pendingResolutions} 条决议未转任务
-                    </span>
-                  ) : null}
-                </div>
-              </li>
+          <ul className="surface divide-y divide-border/50 overflow-hidden pb-1">
+            {upcoming.length > 0 ? (
+              <SectionHeader label="即将召开" count={upcoming.length} />
+            ) : null}
+            {upcoming.map((meeting) => (
+              <MeetingItem
+                key={meeting.id}
+                meeting={meeting}
+                time={formatTime[meeting.id]}
+              />
+            ))}
+            {past.length > 0 ? (
+              <SectionHeader label="已开过" count={past.length} />
+            ) : null}
+            {past.map((meeting) => (
+              <MeetingItem
+                key={meeting.id}
+                meeting={meeting}
+                time={formatTime[meeting.id]}
+              />
             ))}
           </ul>
         )}

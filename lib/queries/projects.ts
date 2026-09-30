@@ -4,6 +4,8 @@
  * 缺口一律在这里算好再交给页面（CLAUDE.md 第 6 条：组件里不许重算）。
  * 页面拿到的 `gap` 就是 lib/gap.ts 的输出，直接渲染即可。
  */
+import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { calcProjectGap, type ProjectGap } from "@/lib/gap";
 import type {
@@ -148,23 +150,19 @@ export type BoardStats = {
   withGapCount: number;
   /** 90 天内到期（含已逾期） */
   dueSoonCount: number;
-  /** 尚未落地的成果 */
-  inFlightAchievementCount: number;
 };
 
-/** 已经"落地"的成果状态，不计入在途 */
-const SETTLED_STATUSES = ["PUBLISHED", "INDEXED", "REJECTED", "SHELVED"] as const;
-
-export async function getBoardStats(projects: ProjectSummary[]): Promise<BoardStats> {
+/**
+ * 纯计算，不查库。原来还带一个「在途成果数」，每次打开首页多跑一条 count，
+ * 却没有任何地方显示它（2026-09-14、09-25 两次审计都点过），09-26 删掉
+ */
+export function getBoardStats(projects: ProjectSummary[]): BoardStats {
   const active = projects.filter((p) => p.status === "ONGOING" || p.status === "CLOSING");
 
   return {
     activeCount: active.length,
     withGapCount: active.filter((p) => p.gap.totalGap > 0).length,
     dueSoonCount: active.filter((p) => p.gap.daysLeft != null && p.gap.daysLeft <= 90).length,
-    inFlightAchievementCount: await prisma.achievement.count({
-      where: { status: { notIn: [...SETTLED_STATUSES] } },
-    }),
   };
 }
 
@@ -172,7 +170,10 @@ export async function getBoardStats(projects: ProjectSummary[]): Promise<BoardSt
 
 export type ProjectDetail = Awaited<ReturnType<typeof getProjectDetail>>;
 
-export async function getProjectDetail(id: string) {
+// generateMetadata 和页面各调一次，同一请求只查一次
+export const getProjectDetail = cache(getProjectDetailUncached);
+
+async function getProjectDetailUncached(id: string) {
   const project = await prisma.project.findUnique({
     where: { id },
     include: {

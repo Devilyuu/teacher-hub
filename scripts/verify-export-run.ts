@@ -68,6 +68,7 @@ async function main() {
           kind: "performance",
           year: 2026,
           options: { includeUnverified: true, includeMissingYear: false },
+          format: "xlsx",
           issues: [{ code: "unverified", count: 1 }],
           groups: [
             {

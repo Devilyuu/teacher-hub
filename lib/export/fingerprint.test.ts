@@ -30,7 +30,7 @@ const item = {
 };
 
 describe("declarationExportInputFingerprint", () => {
-  const profile = { name: "张三", unit: "设计学院" };
+  const profile = { name: "张三", unit: "设计学院", currentTitleSince: null };
 
   it("同一批数据不受查询顺序影响", () => {
     const a = { ...item, sourceId: "a", href: "/achievements/a" };
@@ -108,6 +108,42 @@ describe("declarationExportInputFingerprint", () => {
         unit: "艺术学院",
       }),
     ).not.toBe(original);
+  });
+
+  /** 预检之后去档案改了任现职日期，职称表进的就是另一批成果，必须判成漂移 */
+  it("任现职日期变化会改变职称表指纹", () => {
+    const since = (y: number) => ({ ...profile, currentTitleSince: new Date(Date.UTC(y, 8, 1)) });
+    const original = declarationExportInputFingerprint([item], 2027, "promotion", since(2019));
+    expect(declarationExportInputFingerprint([item], 2027, "promotion", since(2021))).not.toBe(
+      original,
+    );
+    expect(declarationExportInputFingerprint([item], 2027, "promotion", profile)).not.toBe(original);
+  });
+
+  /** 预检之后重新导入了量化表，汇总表上的封顶后合计就不是页面上那个数 */
+  it("封顶规则变化会改变职称表指纹，不影响绩效表", () => {
+    const rule = {
+      code: "5.1",
+      majorIndicator: "科研成果及业绩",
+      minorIndicator: "论文",
+      majorCap: 50,
+      cap: 10,
+      capGroup: "5.1",
+    };
+    const promotion = (rules: (typeof rule)[]) =>
+      declarationExportInputFingerprint([item], 2027, "promotion", profile, rules);
+    expect(promotion([{ ...rule, cap: 8 }])).not.toBe(promotion([rule]));
+    expect(promotion([])).not.toBe(promotion([rule]));
+    expect(declarationExportInputFingerprint([item], 2026, "performance", profile, [rule])).toBe(
+      declarationExportInputFingerprint([item], 2026, "performance", profile, []),
+    );
+  });
+
+  it("任现职日期只影响职称表，改了它绩效表不判漂移", () => {
+    const withSince = { ...profile, currentTitleSince: new Date(Date.UTC(2019, 8, 1)) };
+    expect(declarationExportInputFingerprint([item], 2026, "performance", withSince)).toBe(
+      declarationExportInputFingerprint([item], 2026, "performance", profile),
+    );
   });
 
   it("正式学校奖励在预检后新增会改变指纹", () => {

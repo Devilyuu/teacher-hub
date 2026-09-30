@@ -164,7 +164,7 @@ function CollapsedShelf({
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
           {projects.length}
         </span>
-        {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
+        {hint ? <span className="text-xs">{hint}</span> : null}
         <span className="text-xs group-open:hidden">展开</span>
         <span className="hidden text-xs group-open:inline">收起</span>
       </summary>

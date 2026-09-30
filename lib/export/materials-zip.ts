@@ -71,6 +71,19 @@ function truncateEntry(name: string): string {
   return `${base.slice(0, room)}${ext}`;
 }
 
+/**
+ * 包内条目名 `编号_类型_原始文件名`：三段各自清理，整体截断时保留扩展名。
+ *
+ * 课题材料 ZIP 和年度申报包（`declaration-materials.ts`）共用这一个——
+ * 同一种「按编号命名的材料」两套命名规则，早晚一边改了一边没改。
+ * 编号段永远非空，顺带挡掉 Windows 保留设备名（见 `buildMaterialZipPlan` 的注释）
+ */
+export function materialEntryName(no: string, kind: AttachmentKind, filename: string): string {
+  return truncateEntry(
+    `${sanitizeZipSegment(no)}_${sanitizeZipSegment(ATTACHMENT_KIND_LABELS[kind])}_${sanitizeZipSegment(filename)}`,
+  );
+}
+
 export type MaterialAttachment = {
   id: string;
   code: string | null;
@@ -165,10 +178,7 @@ export function buildMaterialZipPlan(input: {
     // 这样同一份材料无论整包下载还是单勾下载，编号都一样，
     // 两次下载的文件放进同一个目录不会互相覆盖，也对得上材料目录
     const prefix = sanitizeZipSegment(attachment.code ?? String(index + 1).padStart(2, "0"));
-    const kind = sanitizeZipSegment(ATTACHMENT_KIND_LABELS[attachment.kind]);
-    const filename = sanitizeZipSegment(attachment.filename);
-
-    let name = truncateEntry(`${prefix}_${kind}_${filename}`);
+    let name = materialEntryName(prefix, attachment.kind, attachment.filename);
 
     // 重名加 (2)(3)。加在扩展名前面，双击还能打开
     const collisions = used.get(name) ?? 0;

@@ -10,14 +10,18 @@ import { deleteStudent, setStudentActive } from "../actions";
  */
 export function StudentRowActions({
   studentId,
+  classGroupId,
   name,
   active,
 }: {
   studentId: string;
+  classGroupId: string;
   name: string;
   active: boolean;
 }) {
   const router = useRouter();
+  // 删完回名册要带上班级：带两个班的老师不该被送回默认班
+  const rosterHref = `/students?class=${encodeURIComponent(classGroupId)}`;
 
   return (
     <div className="flex items-center gap-2">
@@ -29,7 +33,7 @@ export function StudentRowActions({
       <form
         action={async () => {
           await deleteStudent(studentId);
-          router.push("/students");
+          router.push(rosterHref);
         }}
       >
         <Button

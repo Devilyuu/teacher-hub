@@ -64,7 +64,7 @@ export function MagnifierArt({ className }: { className?: string }) {
   );
 }
 
-/** 写字板：还没有任务 / 排班记录 */
+/** 写字板：还没有任务 / 轮派记录 */
 export function ClipboardArt({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} aria-hidden {...strokeProps}>

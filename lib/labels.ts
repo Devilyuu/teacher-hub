@@ -26,6 +26,7 @@ import type {
   RecordingStatus,
   CompetitionStatus,
   CompetitionAward,
+  ExportKind,
 } from "@/lib/generated/prisma/enums";
 
 export const LEVEL_LABELS = {
@@ -320,7 +321,8 @@ export const RECORDING_STATUS_LABELS = {
   UPLOADED: "等待转写",
   TRANSCRIBING: "转写中",
   TRANSCRIBED: "转写完成",
-  DRAFT_READY: "草稿待确认",
+  // 不叫「草稿待确认」：「待确认」只归成果的核实状态（CLAUDE.md 术语一节）
+  DRAFT_READY: "草稿已生成",
   CONFIRMED: "已确认",
   DELETE_PENDING: "等待删除音频",
   AUDIO_DELETED: "音频已删除",
@@ -367,3 +369,11 @@ export const COMPETITION_AWARD_LABELS = {
   OTHER: "其他奖项",
   NONE: "未获奖",
 } satisfies Record<CompetitionAward, string>;
+
+/** 导出记录的种类（ExportRun.kind），导出页「最近导出」用 */
+export const EXPORT_KIND_LABELS = {
+  PERF_DECLARATION: "绩效申报表",
+  PROMOTION_DECLARATION: "职称量化表",
+  PROJECT_CLOSEOUT: "结题清单",
+  MATERIAL_ZIP: "课题材料 ZIP",
+} satisfies Record<ExportKind, string>;

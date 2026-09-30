@@ -93,7 +93,21 @@ fi
   ls -lh "$DEST" | tail -n +2 | awk '{print "  " $9 "  " $5}'
 } > "$DEST/manifest.txt"
 
-# ── 5. 滚动清理 ────────────────────────────────────────────
+# ── 5. 记一笔「备份成功」────────────────────────────────────
+# 写进 ActivityLog，平台设置页和首页据此显示「最近一次成功备份」，
+# 超过 36 小时没有新的一笔就在首页提示（lib/backup/freshness.ts）。
+# 放在所有校验之后：前面任何一步失败，set -e 早已退出，这一笔就不会写——
+# 「没有新记录」正是失败的信号。id 由 Prisma 在应用侧生成，这里用库自带的 uuid。
+# **createdAt 必须显式写 UTC**：Prisma 往 timestamp 列里存的是 UTC 墙上时间，而线上库的
+# 会话时区是 Asia/Shanghai，靠列默认值 CURRENT_TIMESTAMP 会存成东八区时间，平台读出来
+# 就晚了 8 小时（2026-09-26 用 SET LOCAL timezone 实测过 Prisma 的写法）。
+# 表名和列名有契约测试对着 schema.prisma 锁住（lib/backup/freshness.test.ts）
+BACKUP_BYTES="$(du -sb "$DEST" | cut -f1)"
+CODE_VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo '未知')"
+docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -q -c \
+  "INSERT INTO \"ActivityLog\" (\"id\", \"entityType\", \"entityId\", \"action\", \"detail\", \"createdAt\") VALUES (gen_random_uuid()::text, 'Backup', '${STAMP}', 'backup.completed', jsonb_build_object('bytes', ${BACKUP_BYTES}::bigint, 'tables', ${TABLE_COUNT}::int, 'codeVersion', '${CODE_VERSION}'), now() AT TIME ZONE 'UTC');"
+
+# ── 6. 滚动清理 ────────────────────────────────────────────
 # 按目录名倒序（名字是时间戳，字典序即时间序），留最新 KEEP 份
 find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d | sort -r | tail -n "+$((KEEP + 1))" | while read -r old; do
   case "$old" in

@@ -17,12 +17,14 @@ export type CheckStudent = { id: string; name: string };
  */
 export function CheckGrid({
   checklistId,
+  classGroupId,
   title,
   students,
   initialCheckedIds,
   closed,
 }: {
   checklistId: string;
+  classGroupId: string;
   title: string;
   students: CheckStudent[];
   initialCheckedIds: string[];
@@ -115,7 +117,8 @@ export function CheckGrid({
         <form
           action={async () => {
             await deleteChecklist(checklistId);
-            router.push("/students/checklists");
+            // 回列表带上班级，别把带两个班的老师送回默认班
+            router.push(`/students/checklists?class=${encodeURIComponent(classGroupId)}`);
           }}
         >
           <Button

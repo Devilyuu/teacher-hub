@@ -53,6 +53,42 @@ function cssVariables(source: string, selector: string): Map<string, string> {
 
 const selectors = [":root", ".dark"] as const;
 
+type Rgba = [r: number, g: number, b: number, a: number];
+
+/** 只认 `#rrggbb` 和 `rgb(r g b / n%)` 两种写法——令牌里就这两种；认不出返回 null */
+function parseColor(value: string): Rgba | null {
+  const hex = value.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (hex) return [...hex.slice(1).map((part) => Number.parseInt(part, 16)), 1] as Rgba;
+  const rgb = value.match(/^rgb\((\d+)\s+(\d+)\s+(\d+)(?:\s*\/\s*(\d+)%)?\)$/);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), rgb[4] ? Number(rgb[4]) / 100 : 1];
+  return null;
+}
+
+/** 半透明面（深色的 --well、--muted）按叠在卡片上的实际效果算 */
+function compositeOver(value: string, base: string): string {
+  const top = parseColor(value);
+  const bottom = parseColor(base);
+  if (!top || !bottom || top[3] === 1) return value;
+  const channel = (index: number) => Math.round(top[index]! * top[3] + bottom[index]! * (1 - top[3]));
+  return `rgb(${channel(0)} ${channel(1)} ${channel(2)})`;
+}
+
+function contrastRatio(foreground: string, background: string): number | null {
+  const luminance = (value: string) => {
+    const color = parseColor(value);
+    if (!color || color[3] !== 1) return null;
+    const [r, g, b] = color.slice(0, 3).map((channel) => {
+      const srgb = channel / 255;
+      return srgb <= 0.03928 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const light = luminance(foreground);
+  const dark = luminance(background);
+  if (light === null || dark === null) return null;
+  return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
+}
+
 describe("设计契约", () => {
   it.each(selectors)("%s 的令牌是 globals.css 的子集", (selector) => {
     const source = cssVariables(globals, selector);
@@ -149,6 +185,33 @@ describe("设计契约", () => {
         /\/\s*1?\d%/,
       );
     }
+  });
+
+  it.each(selectors)("%s 的文字配色够 WCAG AA 4.5:1", (selector) => {
+    // 2.0.0 的浅色主色白字只有 3.80:1、次要文字落在画布上 4.46:1，
+    // 样张上看不出来，是 Codex 评审拿数字量出来的（2026-09-14）。
+    // 对比度差一点不会报错，只会让投影和老显示器上的字发虚，所以只能靠机器盯
+    const tokens = cssVariables(globals, selector);
+    const pairs: Array<[text: string, surface: string]> = [
+      ["--primary-foreground", "--primary"],
+      ["--primary", "--background"],
+      ["--primary", "--card"],
+      ["--accent-foreground", "--accent"],
+      ["--muted-foreground", "--background"],
+      ["--muted-foreground", "--card"],
+      ["--muted-foreground", "--well"],
+      ["--muted-foreground", "--muted"],
+    ];
+
+    const failing = pairs.flatMap(([text, surface]) => {
+      const surfaceColor = compositeOver(tokens.get(surface)!, tokens.get("--card")!);
+      const ratio = contrastRatio(tokens.get(text)!, surfaceColor);
+      // 认不出的写法算红：静默跳过就等于这对颜色没人量
+      if (ratio === null) return [`${text} 压 ${surface} 的色值解析不了`];
+      return ratio >= 4.5 ? [] : [`${text} 压 ${surface} 只有 ${ratio.toFixed(2)}`];
+    });
+
+    expect(failing, failing.join("；")).toEqual([]);
   });
 
   it("不把 Tailwind 的构建细节泄进契约", () => {

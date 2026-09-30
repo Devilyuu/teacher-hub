@@ -46,6 +46,7 @@ export type RecordingPanelItem = {
 export function RecordingPanel({
   meetingId,
   transcriptionEnabled,
+  cloudTranscription,
   asrConfigured,
   minutesConfigured,
   recordings,
@@ -53,6 +54,8 @@ export function RecordingPanel({
 }: {
   meetingId: string;
   transcriptionEnabled: boolean;
+  /** 这个部署能不能送云端转写。桌面版不能：转写开关和「同意上传腾讯云」整块不画（lib/transcription/upload.ts） */
+  cloudTranscription: boolean;
   asrConfigured: boolean;
   minutesConfigured: boolean;
   recordings: RecordingPanelItem[];
@@ -130,19 +133,22 @@ export function RecordingPanel({
     <section className="surface space-y-4 p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-sm font-medium">会议录音与转写</h2>
+          <h2 className="text-sm font-medium">{cloudTranscription ? "会议录音与转写" : "会议录音"}</h2>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            支持 m4a、mp3、wav、aac，单个不超过 100MB、2 小时。音频保存在独立私有临时目录。
+            支持 m4a、mp3、wav、aac，单个不超过 100MB、2 小时。
+            {cloudTranscription ? "音频保存在独立私有临时目录。" : "录音只存在这台电脑上，不会发送到任何地方。"}
           </p>
         </div>
-        <form action={toggleAction} className="flex items-center gap-2 text-xs">
-          <input name="enabled" type="checkbox" defaultChecked={transcriptionEnabled} />
-          <span>允许本会议转写</span>
-          <Button type="submit" size="sm" variant="outline">保存</Button>
-        </form>
+        {cloudTranscription ? (
+          <form action={toggleAction} className="flex items-center gap-2 text-xs">
+            <input name="enabled" type="checkbox" defaultChecked={transcriptionEnabled} />
+            <span>允许本会议转写</span>
+            <Button type="submit" size="sm" variant="outline">保存</Button>
+          </form>
+        ) : null}
       </div>
 
-      {transcriptionEnabled && !asrConfigured ? (
+      {cloudTranscription && transcriptionEnabled && !asrConfigured ? (
         <p className="rounded-lg bg-[var(--h-amber-bg)] px-3 py-2 text-xs text-[var(--h-amber-fg)]">
           腾讯云转写尚未配置。录音仍可成功上传并显示在列表中，配置完成前不会发起转写，也无需重复上传。
         </p>
@@ -161,7 +167,7 @@ export function RecordingPanel({
           className="file:mr-3 file:rounded-full file:border-0 file:bg-muted file:px-3 file:py-1 file:text-xs"
         />
         {selectionError ? <p className="text-xs text-destructive">{selectionError}</p> : null}
-        {transcriptionEnabled ? (
+        {!cloudTranscription ? null : transcriptionEnabled ? (
           <label className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
             <input name="cloudDisclosure" type="checkbox" required />
             <span>

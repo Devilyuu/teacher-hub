@@ -7,6 +7,8 @@ import {
   performanceMinorFacets,
   promotionMajorFacets,
   promotionMinorFacets,
+  projectsWithoutPerformanceEntries,
+  promotionCapsOf,
   promotionScoreComposition,
   PROMOTION_SCORE_UNCATEGORIZED,
   scoreWithoutPromotionCategoryCount,
@@ -264,6 +266,29 @@ describe("unified outcome facets", () => {
     expect(scoreWithoutPromotionCategoryCount(rows)).toBe(1);
   });
 
+  it("lists projects that never had a performance entry, and only projects", () => {
+    // 申报未中的课题绩效上仍有基本分，但那条「申报」事项得人工登记；
+    // 没登记时它在绩效口径下整行消失，页面靠这份名单把缺口说出来
+    const rows = [
+      project(),
+      project({
+        key: "PROJECT:rejected",
+        id: "rejected",
+        projectStatus: "REJECTED",
+        performanceEntries: [],
+      }),
+      achievement({
+        key: "ACHIEVEMENT:bare",
+        id: "bare",
+        performanceEntries: [],
+      }),
+    ];
+
+    expect(projectsWithoutPerformanceEntries(rows).map((row) => row.id)).toEqual([
+      "rejected",
+    ]);
+  });
+
   it("orders type facets by the enum, hides empty types, and puts projects first", () => {
     const rows = [
       achievement({ key: "ACHIEVEMENT:a1", id: "a1", achievementType: "PATENT" }),
@@ -469,6 +494,35 @@ describe("年度分面联动", () => {
         slices: [{ major: "科研成果及业绩", score: 4 }],
         deducted: -3,
       });
+    });
+  });
+
+  /** 成果页「职称量化分合计」旁边的「封顶后」，和导出职称表是同一个 applyPromotionCaps */
+  describe("promotionCapsOf", () => {
+    const paper = { code: "5.1", majorIndicator: "科研成果及业绩", minorIndicator: "论文" };
+    const rules = [
+      { ...paper, majorCap: 50, cap: 10, capGroup: "5.1" },
+    ];
+
+    it("挂了指标、填了分的行按编号加起来再截", () => {
+      const rows = [
+        achievement({ key: "ACHIEVEMENT:a1", promotionCategory: paper, promotionScore: 7 }),
+        project({ key: "PROJECT:p1", promotionCategory: paper, promotionScore: 6 }),
+      ];
+      expect(promotionCapsOf(rows, rules)).toMatchObject({
+        rawTotal: 13,
+        cappedTotal: 10,
+        overCap: [{ label: "5.1", raw: 13, cap: 10 }],
+      });
+    });
+
+    it("没挂指标或没填分的行不进核算", () => {
+      const rows = [
+        achievement({ key: "ACHIEVEMENT:a1", promotionCategory: null, promotionScore: 30 }),
+        achievement({ key: "ACHIEVEMENT:a2", promotionCategory: paper, promotionScore: null }),
+        achievement({ key: "ACHIEVEMENT:a3", promotionCategory: paper, promotionScore: 4 }),
+      ];
+      expect(promotionCapsOf(rows, rules)).toMatchObject({ rawTotal: 4, cappedTotal: 4, overCap: [] });
     });
   });
 });

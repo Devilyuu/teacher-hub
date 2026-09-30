@@ -8,9 +8,11 @@ import {
   formatClassName,
   halfDayOf,
   homeTimetableWeek,
+  lastScheduledWeek,
   mergeAdjacentPeriods,
   parseTimetableGrid,
   parseWeeksText,
+  resolveBrowseWeek,
   teachingPosition,
   type ParsedSlot,
 } from "@/lib/timetable";
@@ -263,5 +265,43 @@ describe("formatClassName", () => {
   it("分号换顿号", () => {
     expect(formatClassName("数字媒体2601;数字媒体2602")).toBe("数字媒体2601、数字媒体2602");
     expect(formatClassName(null)).toBeNull();
+  });
+});
+
+describe("翻周", () => {
+  const start = dateOnly(2026, 9, 7);
+  const slots = [{ weeks: [1, 2, 3] }, { weeks: [8, 9, 10] }];
+
+  it("排到第几周取条目里的最大周次，超量程的手误不算", () => {
+    expect(lastScheduledWeek(slots)).toBe(10);
+    expect(lastScheduledWeek([{ weeks: [1, 30] }])).toBe(1);
+    expect(lastScheduledWeek([])).toBe(0);
+  });
+
+  it("默认落在今天所在的那一周，不是第 1 周", () => {
+    // 2026-09-21 是开学后第 15 天 → 第 3 教学周
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21)).week).toBe(3);
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21)).currentWeek).toBe(3);
+  });
+
+  it("假期里没有「今天」就落到第 1 周", () => {
+    const browse = resolveBrowseWeek(slots, start, dateOnly(2026, 8, 1));
+    expect(browse.week).toBe(1);
+    expect(browse.currentWeek).toBeNull();
+  });
+
+  it("请求的周次夹到量程内，认不出就当没请求", () => {
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21), "5").week).toBe(5);
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21), "999").week).toBe(10);
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21), "0").week).toBe(3);
+    expect(resolveBrowseWeek(slots, start, dateOnly(2026, 9, 21), "下周").week).toBe(3);
+  });
+
+  it("今天走过了课表的最后一周，仍然翻得到今天", () => {
+    // 开学后第 90 天 → 第 13 周，而课表只排到第 10 周
+    const browse = resolveBrowseWeek(slots, start, dateOnly(2026, 12, 6));
+    expect(browse.currentWeek).toBe(13);
+    expect(browse.maxWeek).toBe(13);
+    expect(browse.week).toBe(13);
   });
 });

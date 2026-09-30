@@ -1,4 +1,5 @@
 import type { ProfileTab } from "@/lib/personal-documents";
+import "server-only";
 import { prisma } from "@/lib/db";
 
 export async function loadProfilePageData(tab: ProfileTab) {

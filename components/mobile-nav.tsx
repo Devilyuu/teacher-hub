@@ -63,7 +63,14 @@ export function MobileTabBar({ modules }: { modules: ModuleVisibility }) {
  * 做成从底部升起的面板而不是左侧抽屉——底栏就在下面，菜单从同一个方向出来，
  * 手指不用跨到屏幕另一头去找。
  */
-export function MobileMenu({ modules }: { modules: ModuleVisibility }) {
+export function MobileMenu({
+  modules,
+  showLogout = true,
+}: {
+  modules: ModuleVisibility;
+  /** 桌面版电脑上的窗口不放「退出」（app/(app)/layout.tsx） */
+  showLogout?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const activeHref = activeNavHref(pathname);
@@ -118,12 +125,14 @@ export function MobileMenu({ modules }: { modules: ModuleVisibility }) {
             <Settings className="size-5 shrink-0" aria-hidden />
             设置
           </Link>
-          <form action={logout}>
-            <button type="submit" className={cn(itemClass, "w-full cursor-pointer text-muted-foreground")}>
-              <LogOut className="size-5 shrink-0" aria-hidden />
-              退出
-            </button>
-          </form>
+          {showLogout ? (
+            <form action={logout}>
+              <button type="submit" className={cn(itemClass, "w-full cursor-pointer text-muted-foreground")}>
+                <LogOut className="size-5 shrink-0" aria-hidden />
+                退出
+              </button>
+            </form>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

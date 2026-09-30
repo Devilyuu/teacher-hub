@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, FileDown } from "lucide-react";
+import { AddToCalendarLink } from "@/components/add-to-calendar-link";
 import { ClipboardArt } from "@/components/empty-art";
 import { Button } from "@/components/ui/button";
 import { CompletionRing, HealthBadge } from "@/components/health";
@@ -72,13 +73,16 @@ export default async function ProjectDetailPage({
 
   return (
     <div className="space-y-6">
-      {/* 圆形返回键 + 超大标题并排，是参考稿最好认的版式 */}
-      <header className="flex flex-wrap items-start justify-between gap-6 pt-2">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
+      {/* 圆形返回键 + 超大标题并排，是参考稿最好认的版式。
+          手机上完成度卡片必须换到标题区下方：原先靠 flex-wrap 折行，但标题区是
+          flex-1（basis 0），flex-wrap 永远判定"放得下"，结果在 390px 上把标题
+          压成一行两三个字。所以 < md 直接竖排，md 起才并排 */}
+      <header className="flex flex-col gap-4 pt-2 md:flex-row md:items-start md:justify-between md:gap-6">
+        <div className="flex min-w-0 items-start gap-3 md:flex-1">
           <Link
             href={backHref}
             aria-label={backLabel}
-            className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-card text-muted-foreground transition-colors hover:text-foreground"
+            className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-card text-muted-foreground transition-colors hover:text-foreground max-md:mt-0 max-md:size-11"
             style={{ boxShadow: "var(--shadow-pill)" }}
           >
             <ArrowLeft className="size-4" aria-hidden />
@@ -100,7 +104,8 @@ export default async function ProjectDetailPage({
           </div>
         </div>
 
-        <div className="surface flex items-center gap-3 px-4 py-3">
+        {/* 手机上左缩进 = 返回键 44px + 间距 12px，和标题、标签左边对齐 */}
+        <div className="surface flex items-center gap-3 self-start px-4 py-3 max-md:ml-14 md:shrink-0">
           <CompletionRing rate={gap.completionRate} health={gap.health} size={52} />
           <div className="text-sm">
             <div className="font-medium">{formatGap(gap.totalGap, gap.totalRequired)}</div>
@@ -108,6 +113,14 @@ export default async function ProjectDetailPage({
               {formatDaysLeft(gap.displayDaysLeft)}
             </div>
           </div>
+          {/* 导出的正是这张卡倒数的那一天（申报期是申报截止、其余是结题截止），
+              过了就不给——提醒都已经错过了 */}
+          {gap.displayDaysLeft != null && gap.displayDaysLeft >= 0 ? (
+            <AddToCalendarLink
+              href={`/api/projects/${project.id}/calendar?deadline=${gap.displayDeadline}`}
+              title={`把${gap.displayDeadline === "apply" ? "申报" : "结题"}截止日加到手机日历，提醒前一天 20:00、当天 8:00`}
+            />
+          ) : null}
         </div>
       </header>
 
@@ -141,6 +154,9 @@ export default async function ProjectDetailPage({
             endDate: project.endDate,
             closingDeadline: project.closingDeadline,
             promotionCategoryId: project.promotionCategoryId,
+            promotionLabel: project.promotionCategory
+              ? `${project.promotionCategory.code} ${project.promotionCategory.minorIndicator}（${project.promotionCategory.year} 版）`
+              : null,
             // Decimal 过不了 Server Component 边界
             promotionScore:
               project.promotionScore == null ? null : Number(project.promotionScore),
@@ -285,7 +301,7 @@ function Overview({
         />
       </dl>
 
-      {/* 职称量化。一个课题只占一行——5.2 是「每项加 N 分」，
+      {/* 职称量化。一个课题只占一行——本校 5.2 是「每项加 N 分」，
           按项赋分，不是立项算一次、结题再算一次 */}
       {project.promotionCategory ? (
         <section className="space-y-1">
@@ -304,9 +320,11 @@ function Overview({
             )}
           </p>
           {/* 赋分细则原样显示，分数由人对着它自己填（设计原则第 1 条） */}
-          <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-            {project.promotionCategory.scoringRule}
-          </p>
+          {project.promotionCategory.scoringRule ? (
+            <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+              {project.promotionCategory.scoringRule}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

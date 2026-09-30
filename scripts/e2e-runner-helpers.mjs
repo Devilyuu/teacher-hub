@@ -30,11 +30,27 @@ export function buildE2eChildEnv(source, generated) {
   return { ...safe, ...generated };
 }
 
+/**
+ * Tracked templates such as `.env.example` and `.env.demo.example`. Nothing loads them:
+ * `dotenv/config` reads `.env`, Next reads `.env`, `.env.local` and `.env.<mode>[.local]`,
+ * and `scripts/demo.mjs` reads `.env.demo`. Exact lowercase only, so a case-insensitive
+ * file system can never alias a template to a loadable name.
+ *
+ * Until 2026-09-25 only `.env.example` passed. `.env.demo.example` (added 2026-08-30 with
+ * the demo environment) made every CI E2E run exit before its first test for four weeks,
+ * behind the deliberately secret-free "E2E failed before completion" message.
+ */
+const DOTENV_TEMPLATE = /^\.env(?:\.[a-z0-9-]+)*\.example$/;
+
+export function isDotenvTemplateName(name) {
+  return DOTENV_TEMPLATE.test(name);
+}
+
 export function assertNoLoadableDotenvFiles(entries) {
   const forbidden = entries.filter((entry) => {
     const name = typeof entry === "string" ? entry : entry.name;
     if (!name.toLocaleLowerCase("en-US").startsWith(".env")) return false;
-    if (name !== ".env.example") return true;
+    if (!isDotenvTemplateName(name)) return true;
     return typeof entry === "string" || !entry.isFile() || entry.isSymbolicLink();
   });
   if (forbidden.length) {

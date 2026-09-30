@@ -1,4 +1,5 @@
 import {
+  BookUser,
   CalendarDays,
   Compass,
   FlaskConical,
@@ -26,16 +27,18 @@ export type NavItem = {
 };
 
 /**
- * 顶部导航全集：**首页 · 日常 · 科研 · 教学 · 参赛 · 班主任 · 成果**，
+ * 顶部导航全集：**首页 · 日常 · 科研 · 教学 · 参赛 · 班主任 · 导师 · 成果**，
  * 顺序按使用频率不按重要性。实际渲染走 `navItemsFor(modules)`——
- * 可选模块（教学 / 参赛 / 班主任，见 lib/modules.ts）关掉就不出现。
+ * 可选模块（教学 / 参赛 / 班主任 / 导师，见 lib/modules.ts）关掉就不出现。
  *
  * 「五项是上限」在模块开关时代先改写成「同时启用不超过 5 项」，
- * 2026-09-12 加「参赛」时**抬到 6 项**：默认可见是
- * 首页/日常/科研/教学/参赛/成果，全集 7 项。抬这一档是有代价的，
- * 记下来省得下次又当成没上限——导航本身是 `overflow-x-auto` 带渐隐指示，
- * 6 项在 1272px 内容区里排得下，真正的成本是**扫一眼要认的入口多了一个**。
- * 再往上加之前先问一句「它能不能是某一项下面的二级 tab」。
+ * 2026-09-12 加「参赛」时抬到 6 项，**2026-09-21 加「导师」时全集到了 8 项**。
+ * 默认可见仍是六项（班主任、导师都默认关闭），实际同时启用最多 7 项。
+ *
+ * 抬这两档的代价记下来，省得下次又当成没上限——导航本身是 `overflow-x-auto`
+ * 带渐隐指示，排得下；真正的成本是**扫一眼要认的入口又多了一个**。
+ * 再往上加之前先问一句「它能不能是某一项下面的二级 tab」，
+ * 并把答案写进注释（「导师」那一项下面就写了为什么不能）。
  *
  * 沿革（这一版相对旧版换过两处，理由留着）：
  * - 「课题」改叫**「科研」**。它是一个工作领域的名字，课题只是这个领域里的
@@ -82,6 +85,19 @@ export const NAV_ITEMS: NavItem[] = [
     icon: UsersRound,
   },
   {
+    // 学业导师。**和班主任是两个模块**（advisor / mentor），不合并成一个
+    // 「学生」域：那要把 navItemsFor 从「一项绑一个模块」改成「任一开着就显示」、
+    // href 还得随开关动态变，是改已上线模块的结构；而两组 tab 挤一行，
+    // 「名册」和「我的学生」并排谁也说不清差别。抬一档上限便宜得多。
+    //
+    // 也**不挂在「教学」下面当二级 tab**：教学模块的定义是「备课系统外联 +
+    // 教案回流」，不部署备课系统的人会把它关掉——而那个人照样可能带导师学生。
+    // 挂进去等于让一个纯外联模块成为另一个独立数据模块的开关前提。
+    href: "/mentees",
+    label: "导师",
+    icon: BookUser,
+  },
+  {
     href: "/achievements",
     label: "成果",
     icon: Trophy,
@@ -106,7 +122,7 @@ export function navItemsFor(modules: ModuleVisibility): NavItem[] {
  * 参赛模块开着时加进去变五项。
  *
  * **只能是 NAV_ITEMS 的子集、顺序跟着全集走**，不另起一份名单——两处各存一份，
- * 早晚出现「底部栏叫科研、侧栏叫课题」这种裂缝。教学和班主任不进底栏：
+ * 早晚出现「底部栏叫科研、侧栏叫课题」这种裂缝。教学、班主任、导师都不进底栏：
  * 手机上底栏放五项已经是上限，再多每格就窄到认不出图标；它们和设置、退出
  * 一起收进顶栏的菜单抽屉，那里放的是全集。
  */
@@ -173,6 +189,29 @@ export function activeStudentTab(pathname: string): string | null {
     if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return tab.href;
   }
   if (pathname === "/students" || pathname.startsWith("/students/")) return "/students";
+  return null;
+}
+
+/**
+ * 「导师」下面的二级导航。**URL 同样刻意嵌套**——理由和班主任一样：
+ * 几个视图共享同一个「当前批次」上下文（`?batch=` 跨 tab 保留），
+ * /mentees 是它们唯一的家。日常那四个是彼此独立的功能，所以才扁平。
+ *
+ * 「项目」放最后：名单和记录是天天用的，项目一年才热闹两次（选题季、答辩季）。
+ */
+export const MENTEE_TABS: Array<{ href: string; label: string }> = [
+  { href: "/mentees", label: "我的学生" },
+  { href: "/mentees/records", label: "指导记录" },
+  { href: "/mentees/projects", label: "项目" },
+];
+
+/** 导师域二级导航的高亮。学生详情（/mentees/<id>）归「我的学生」 */
+export function activeMenteeTab(pathname: string): string | null {
+  for (const tab of MENTEE_TABS) {
+    if (tab.href === "/mentees") continue;
+    if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return tab.href;
+  }
+  if (pathname === "/mentees" || pathname.startsWith("/mentees/")) return "/mentees";
   return null;
 }
 

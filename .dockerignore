@@ -29,3 +29,6 @@ README.md
 # 构建期刚按当前 schema 生成的那份，新增模型时就会报
 # `Property 'xxx' does not exist on type 'PrismaClient'`。
 lib/generated
+
+# 桌面版（desktop/）有自己的依赖和几百 MB 的二进制资源，不进服务器镜像
+desktop

@@ -10,14 +10,21 @@
  * - **关闭 = 隐藏，不 = 删除，也不 = 封锁。** 数据一个字节不动，重新勾上一切
  *   回来；直接访问被关模块的 URL 显示「未启用」提示而不是 403——用户才敢随便试。
  * - **平台骨架不进注册表**：首页、任务、会议、日历、科研、成果是本体，不可关。
- * - 「五个一级入口是上限」在开关时代改写成**「同时启用的一级入口不超过 5 个」**，
- *   设置页勾到第 6 个给软提示（提示，不阻止——校验永远不阻止保存的老规矩）。
+ * - 「五个一级入口是上限」在开关时代改写成**「同时启用的一级入口不超过 N 个」**，
+ *   超出给软提示（提示，不阻止——校验永远不阻止保存的老规矩）。
+ *   **阈值只写在 app/(app)/settings/modules-panel.tsx 一处**，别在这里也写一个数字：
+ *   这行注释以前写着「不超过 5 个」，而实际阈值早已是 6，两个数字对不上了大半年。
  *
  * 本文件必须保持客户端可引用（SideNav 是客户端组件）：
  * 不 import prisma、不加 server-only。读数据库的部分在 lib/module-settings.ts。
  */
 
-export type ModuleKey = "teaching" | "duties" | "advisor" | "competitions";
+export type ModuleKey =
+  | "teaching"
+  | "duties"
+  | "advisor"
+  | "competitions"
+  | "mentor";
 
 export type ModuleDef = {
   key: ModuleKey;
@@ -65,6 +72,19 @@ export const MODULES: readonly ModuleDef[] = [
       "班级名册、勾名单收缴、学生荣誉、谈话记录。带班才用得上，默认关闭。",
     routes: ["/students"],
     // 这个模块是给带班老师准备的，不带班就一直关着
+    defaultEnabled: false,
+  },
+  {
+    // **和上面那个不是一回事。** advisor = 班主任（一个班的日常事务），
+    // mentor = 学业导师（双选分来的一批学生，从低年级带到毕业 + 毕设指导）。
+    // 英文 advisor 本义就是「导师」，两个词在中文里都像「导师」——
+    // 但它们是两个模块、两套表、两个开关，路由也刻意岔开（/students 与 /mentees）。
+    key: "mentor",
+    label: "导师",
+    description:
+      "学业导师带的学生：名单、指导记录、毕设与作品。不带导师学生就关掉。",
+    routes: ["/mentees"],
+    // 同班主任：不是每个老师都带导师学生，默认关着
     defaultEnabled: false,
   },
 ] as const;

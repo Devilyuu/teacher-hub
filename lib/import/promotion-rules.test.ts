@@ -102,9 +102,95 @@ describe("buildPromotionPlan", () => {
     expect(plan.warnings.some((w) => w.includes("教师系列"))).toBe(true);
   });
 
-  it("编号写错格式会被 zod 挡住", () => {
+  it("空编号会被 zod 挡住", () => {
     const doc = minimalDoc();
-    (doc.indicators as Array<Record<string, unknown>>)[0].code = "五点二";
+    (doc.indicators as Array<Record<string, unknown>>)[0].code = "  ";
     expect(() => buildPromotionPlan(doc)).toThrow();
+  });
+});
+
+/**
+ * 别的学校的表（2026-09-27 放宽）：编号格式不限，一级上限、本栏上限、赋分原文、
+ * 适用系列、系列总分、整表说明都可以没有。缺了哪一重校验就不跑，不报假告警。
+ */
+describe("buildPromotionPlan · 别的学校的表", () => {
+  const bare = {
+    year: 2026,
+    source: "明湖职业技术学院职称评审量化表（虚构）",
+    indicators: [
+      { code: "A2", major_indicator: "教学", minor_indicator: "课程建设" },
+      { code: "A10", major_indicator: "教学", minor_indicator: "教学竞赛" },
+      { code: "B1", major_indicator: "科研", minor_indicator: "纵向项目", project_eligible: true },
+    ],
+  };
+
+  it("只有编号和两级指标名也能导，编号按自然序排", () => {
+    const plan = buildPromotionPlan(bare);
+    expect(plan.drafts.map((d) => d.code)).toEqual(["A2", "A10", "B1"]);
+    expect(plan.drafts[0]).toMatchObject({
+      majorCap: null,
+      cap: null,
+      scoringRule: null,
+      capGroup: "A2",
+      appliesTo: [],
+    });
+  });
+
+  it("没有上限、没有系列总分时一重校验都不跑，零告警", () => {
+    const plan = buildPromotionPlan(bare);
+    expect(plan.checks).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.head).toMatchObject({ generalNotes: [], teacherTotal: null, eduAdminTotal: null });
+  });
+
+  it("「课题可挂」没写就是 undefined（写库时保留原值），写了照搬", () => {
+    const plan = buildPromotionPlan(bare);
+    expect(plan.drafts.find((d) => d.code === "A2")?.projectEligible).toBeUndefined();
+    expect(plan.drafts.find((d) => d.code === "B1")?.projectEligible).toBe(true);
+  });
+
+  it("一级上限只写在某一行上，同组别的行也认它（粘贴来的表常常只在合并单元格第一行有值）", () => {
+    const plan = buildPromotionPlan({
+      ...bare,
+      indicators: [
+        { code: "1.1", major_indicator: "教学", major_cap: 20, minor_indicator: "课程", cap: 12 },
+        { code: "1.2", major_indicator: "教学", minor_indicator: "竞赛", cap: 8 },
+      ],
+    });
+    expect(plan.drafts.map((d) => d.majorCap)).toEqual([20, 20]);
+    expect(plan.checks).toEqual([{ label: "一级指标「教学」", expected: 20, actual: 20, ok: true }]);
+  });
+
+  it("有一栏没写上限时不比一级上限——加不出一个可比的数，比了只会报假告警", () => {
+    const plan = buildPromotionPlan({
+      ...bare,
+      indicators: [
+        { code: "1.1", major_indicator: "教学", major_cap: 20, minor_indicator: "课程", cap: 12 },
+        { code: "1.2", major_indicator: "教学", minor_indicator: "竞赛" },
+      ],
+    });
+    expect(plan.checks).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("同一个一级指标写了两个不同的上限：告警，各行照原样不替人挑", () => {
+    const plan = buildPromotionPlan({
+      ...bare,
+      indicators: [
+        { code: "1.1", major_indicator: "教学", major_cap: 20, minor_indicator: "课程" },
+        { code: "1.2", major_indicator: "教学", major_cap: 30, minor_indicator: "竞赛" },
+      ],
+    });
+    expect(plan.drafts.map((d) => d.majorCap)).toEqual([20, 30]);
+    expect(plan.warnings.some((w) => w.includes("封顶分不一致"))).toBe(true);
+  });
+
+  it("编号超过 20 个字被挡住——多半是把整列说明指成了编号", () => {
+    expect(() =>
+      buildPromotionPlan({
+        ...bare,
+        indicators: [{ code: "一".repeat(21), major_indicator: "教学", minor_indicator: "课程" }],
+      }),
+    ).toThrow();
   });
 });

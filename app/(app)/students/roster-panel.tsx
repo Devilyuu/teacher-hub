@@ -52,10 +52,21 @@ function SubmitButton({ label }: { label: string }) {
 }
 
 /** 学生姓名统一链到卡片页——电话、备注、记录都在那儿 */
-function StudentLink({ id, name, active }: { id: string; name: string; active: boolean }) {
+function StudentLink({
+  id,
+  classGroupId,
+  name,
+  active,
+}: {
+  id: string;
+  classGroupId: string;
+  name: string;
+  active: boolean;
+}) {
+  // 带上班级：从卡片页点回名册、点其他 tab 都不该跳回默认班
   return (
     <Link
-      href={`/students/${id}`}
+      href={`/students/${id}?class=${encodeURIComponent(classGroupId)}`}
       className={
         active
           ? "font-medium underline-offset-4 hover:underline"
@@ -164,9 +175,11 @@ function BulkImportForm({ classGroupId, onDone }: { classGroupId: string; onDone
 
 /** 宿舍分组视图。分组本身就是排错器：打错的宿舍号会裂成孤零零的一行 */
 function DormView({
+  classGroupId,
   students,
   relations,
 }: {
+  classGroupId: string;
   students: StudentRow[];
   relations: RelationRow[];
 }) {
@@ -207,7 +220,7 @@ function DormView({
               {occupants.map((student, index) => (
                 <span key={student.id}>
                   {index > 0 ? "、" : ""}
-                  <StudentLink id={student.id} name={student.name} active />
+                  <StudentLink id={student.id} classGroupId={classGroupId} name={student.name} active />
                 </span>
               ))}
             </p>
@@ -292,7 +305,7 @@ export function RosterPanel({
           </p>
         </div>
       ) : view === "dorm" ? (
-        <DormView students={students} relations={relations} />
+        <DormView classGroupId={classGroupId} students={students} relations={relations} />
       ) : (
         <div className="surface overflow-hidden">
           <Table>
@@ -311,7 +324,12 @@ export function RosterPanel({
               {students.map((student) => (
                 <TableRow key={student.id} className={student.active ? undefined : "opacity-50"}>
                   <TableCell className="whitespace-nowrap">
-                    <StudentLink id={student.id} name={student.name} active={student.active} />
+                    <StudentLink
+                      id={student.id}
+                      classGroupId={classGroupId}
+                      name={student.name}
+                      active={student.active}
+                    />
                   </TableCell>
                   <TableCell className="text-muted-foreground tabular-nums">
                     {student.studentNo ?? "—"}

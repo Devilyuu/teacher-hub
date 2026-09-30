@@ -5,6 +5,7 @@ import {
   TASK_STATUS_LABELS,
 } from "@/lib/labels";
 import { dateOnlyField, optionalText } from "@/lib/schemas/project";
+import { normalizeAssignee } from "@/lib/tasks";
 
 /** 三个枚举一律从中文映射表派生，不手抄取值（同 levelEnum 的范式） */
 function enumOf<T extends Record<string, string>>(labels: T) {
@@ -32,6 +33,12 @@ export const taskFormSchema = z.object({
   note: optionalText,
   /** 自由标签，逗号/顿号/空格分隔，由 parseTags 拆 */
   tags: z.string().default(""),
+  /**
+   * 负责人。留空 = 我。填了别人的名字，这条就进首页右栏的「等别人」。
+   * 这不是任务指派（prd-routines 5 仍然不做多人协作）——只是记一下在等谁，
+   * 好让自己去催；自由文本，和会议决议、轮派转任务写进来的口径一致
+   */
+  assignee: z.string().optional().transform(normalizeAssignee),
 });
 
 export const recurringRuleFormSchema = z

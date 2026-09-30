@@ -19,11 +19,13 @@ import {
   FolderCheckArt,
 } from "@/components/empty-art";
 import { compareByHealth } from "@/components/health";
+import { BackupStaleNotice } from "@/components/backup-stale-notice";
+import { GettingStarted } from "@/components/getting-started";
 import { HomeGreeting } from "@/components/home-greeting";
 import {
   DeadlineCountdown,
   UpcomingMeetings,
-  WeeklyDigest,
+  WaitingOn,
   type DeadlineItem,
 } from "@/components/home-side";
 import { CaptureInbox } from "@/components/capture-inbox";
@@ -42,10 +44,11 @@ import {
 import {
   ensureRecurringTasks,
   getRoutineStats,
-  getTasks,
+  getTodayQueueTasks,
   getUpcomingMeetings,
+  getWaitingOnTasks,
 } from "@/lib/queries/routines";
-import { capForHome } from "@/lib/capture";
+import { HOME_SECTION_LIMIT, capForHome } from "@/lib/capture";
 import {
   DEADLINE_KIND_LABELS,
   upcomingCompetitionDeadlines,
@@ -55,10 +58,20 @@ import { emphasizedStat } from "@/lib/home-stats";
 import { getEnabledModules } from "@/lib/module-settings";
 import { prisma } from "@/lib/db";
 import { getPendingCaptures } from "@/lib/queries/captures";
+import {
+  getActiveMentees,
+  getMenteeMilestonesBetween,
+  getMenteeRecordTypes,
+  resolveMenteeBatch,
+} from "@/lib/queries/mentees";
+import {
+  milestoneDeadlineLabel,
+  upcomingMilestoneDeadlines,
+} from "@/lib/mentees";
+import { todayAsDateOnly } from "@/lib/date";
 import { getRecordTypes, resolveClassGroup } from "@/lib/queries/students";
 import { getMinutesHomeQueueWithRuntime } from "@/lib/queries/minutes";
 import { getHomeTimetable } from "@/lib/queries/timetable";
-import { todayQueueTasks } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
 import type { ProjectStatus } from "@/lib/generated/prisma/enums";
 
@@ -128,7 +141,8 @@ export default async function HomePage() {
   const [
     stats,
     routine,
-    tasks,
+    todayQueue,
+    waitingOn,
     meetings,
     captures,
     minutesQueue,
@@ -137,7 +151,10 @@ export default async function HomePage() {
   ] = await Promise.all([
     getBoardStats(active),
     getRoutineStats(),
-    getTasks(),
+    // 只取首页要的那几条 + 总数，不再把全表任务拉回来裁（lib/queries/routines.ts）
+    getTodayQueueTasks(HOME_SECTION_LIMIT),
+    // 右栏「等别人」比左栏窄，上限 6 条就够
+    getWaitingOnTasks(6),
     getUpcomingMeetings(),
     getPendingCaptures(),
     getMinutesHomeQueueWithRuntime(),
@@ -167,10 +184,26 @@ export default async function HomePage() {
         };
       })()
     : null;
-  // 和收件箱同一条上限（CLAUDE.md：首页每块上限 8 条，超出显示「还有 N 条」）。
-  // todayQueueTasks 已按截止日升序排好，裁掉的是最不紧急的那截
-  const todayQueue = capForHome(todayQueueTasks(tasks));
 
+  // 学业导师模块开着时，收件箱再多一个「归到导师学生」去向。
+  // **和上面那块是两份**：advisor 挂班级、mentor 挂批次，两个模块可以同时开着。
+  // 默认批次取最近一届未归档的——归类是快动作，不在收件箱里选批次
+  const mentorContext = modules.mentor
+    ? await (async () => {
+        const batch = await resolveMenteeBatch(undefined);
+        if (!batch) return null;
+        const [mentees, types] = await Promise.all([
+          getActiveMentees(batch.id),
+          getMenteeRecordTypes(),
+        ]);
+        if (types.length === 0) return null;
+        return {
+          batchId: batch.id,
+          mentees,
+          types: types.map((type) => ({ id: type.id, name: type.name })),
+        };
+      })()
+    : null;
   // 实心那张跟着紧急度走，不钉死在第一格（lib/home-stats.ts）
   const emphasized = emphasizedStat({
     dueToday: routine.dueToday,
@@ -207,6 +240,35 @@ export default async function HomePage() {
       )
     : [];
 
+  // 学生项目的节点（开题/中期/答辩）一起排进来。三条口径在 lib/mentees.ts：
+  // 只取今天及以后、同一天同一个节点合并成一条、只报天数不判断要不要紧。
+  // **合并那条是必须的**——六个学生同一天答辩，不合并就把这张卡的四个名额
+  // 全占了，而它存在的理由本来是课题结题截止
+  //
+  // 窗口取 90 天：倒计时那条轴本来就是 90 天量程（components/home-side.tsx），
+  // 再远的节点画出来也在轴外
+  const milestoneToday = todayAsDateOnly();
+  const milestoneDeadlines = modules.mentor
+    ? upcomingMilestoneDeadlines(
+        (
+          await getMenteeMilestonesBetween(
+            milestoneToday,
+            // 纯日期列按 UTC 解释，而 todayAsDateOnly() 正好是 UTC 午夜，
+            // 直接加毫秒是安全的（同 calendar/page.tsx 的 `wide`）
+            new Date(milestoneToday.getTime() + 90 * 86_400_000),
+          )
+        ).map((milestone) => ({
+          id: milestone.id,
+          label: milestone.label,
+          date: milestone.date,
+          projectId: milestone.project.id,
+          projectTitle: milestone.project.title,
+          ownerName: milestone.project.members[0]?.mentee.name ?? null,
+        })),
+        milestoneToday,
+      )
+    : [];
+
   const deadlines: DeadlineItem[] = [
     ...all
       .filter(
@@ -227,6 +289,13 @@ export default async function HomePage() {
       hint: "",
       href: `/competitions/${item.entryId}`,
     })),
+    ...milestoneDeadlines.map((item) => ({
+      id: `ms-${item.key}`,
+      name: milestoneDeadlineLabel(item),
+      daysLeft: item.daysLeft,
+      hint: "",
+      href: item.href,
+    })),
   ]
     .sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0))
     .slice(0, 4);
@@ -234,6 +303,12 @@ export default async function HomePage() {
   return (
     <div className="space-y-6">
       <HomeGreeting />
+
+      {/* 只在服务器超过 36 小时没成功备份时出现，平时不占位（lib/backup/freshness.ts） */}
+      <BackupStaleNotice />
+
+      {/* 刚装好时的三件事（档案、分类表、课表）。做完或点了「不再显示」就一个字节不占（lib/getting-started.ts） */}
+      <GettingStarted />
 
       {/* `grid-cols-1` 不是多余的。Tailwind 的 `grid` 只设 display:grid，
           单列时 grid-template-columns 是 none，而 grid item 默认 min-width:auto
@@ -292,6 +367,7 @@ export default async function HomePage() {
             items={inbox.shown}
             overflow={inbox.overflow}
             advisor={advisorContext}
+            mentor={mentorContext}
           />
 
           {/* 本周课表放左栏最底：它是状态不是待办，排在能被处理掉的事后面；
@@ -300,7 +376,12 @@ export default async function HomePage() {
           {timetable ? <WeekTimetable data={timetable} /> : null}
         </div>
 
-        <div className="space-y-4">
+        {/* 右栏跟着滚（sticky）。两栏各自变高、谁也不等谁：左栏是 0–8 条任务 + 收件箱 +
+            课表，右栏是会议 + 等别人 + 倒计时，高度差填不平——往右下角塞一块内容只会多一张
+            没人看的卡（2026-09-15 试过「本周动态」）。钉住之后左栏往下滚时右栏三张卡留在
+            视口里，底下那块空白永远露不出来。`self-start` 必须有：grid 默认 stretch 会把
+            右栏拉到和左栏一样高，sticky 就没有滚动余地了 */}
+        <div className="space-y-4 lg:sticky lg:top-[calc(var(--topbar-h)+1.25rem)] lg:self-start">
           <UpcomingMeetings
             meetings={meetings.map((meeting) => ({
               id: meeting.id,
@@ -309,10 +390,7 @@ export default async function HomePage() {
               timeText: formatTimestamp(meeting.meetingTime),
             }))}
           />
-          <WeeklyDigest
-            doneThisWeek={routine.doneThisWeek}
-            openTasks={routine.openTasks}
-          />
+          <WaitingOn tasks={waitingOn.shown} overflow={waitingOn.overflow} />
           <DeadlineCountdown items={deadlines} />
         </div>
       </div>
@@ -465,7 +543,7 @@ function StatCard({
         <span
           className={cn(
             "text-xs font-medium",
-            emphasis ? "text-primary-foreground/85" : "text-muted-foreground",
+            emphasis ? "text-primary-foreground" : "text-muted-foreground",
           )}
         >
           {label}
@@ -498,7 +576,7 @@ function ArchivedShelf({
         <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums">
           {projects.length}
         </span>
-        {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
+        {hint ? <span className="text-xs">{hint}</span> : null}
         <span className="text-xs group-open:hidden">展开</span>
         <span className="hidden text-xs group-open:inline">收起</span>
       </summary>

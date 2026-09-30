@@ -19,7 +19,9 @@ export type CalendarEvent = {
     | "projectDeadline"
     | "taskDue"
     /** 参赛的报名截止与比赛日期。和课题截止同属「不能错过」那一档 */
-    | "competition";
+    | "competition"
+    /** 学生项目的开题/中期/答辩。**只有填了精确日期的才进来**（第 8 条铁律） */
+    | "menteeMilestone";
   title: string;
   /** YYYY-MM-DD */
   date: string;
@@ -89,6 +91,31 @@ export function buildMonthGrid(
   return cells;
 }
 
+const WEEKDAY_LABELS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+export type AgendaDay = CalendarCell & { weekday: string };
+
+/**
+ * 手机上的月历：同一份格子压成「按天列表」，**只留本月有安排的日子**。
+ *
+ * 七列网格在 390px 宽的屏上要横滑两屏多（2026-09-14 审核报告），而横滑时
+ * 左边的周一早就滑出去了，看不出哪天是周几。照宽表的处方换成列表：
+ * 数据用同一份 `buildMonthGrid` 的结果，手机和桌面看同一天必须是同几条。
+ *
+ * - 补齐格（上月末、下月初）不进列表：列表没有网格的错位问题，不需要它们
+ * - 没安排的日子不列：一个月三十行里二十行空着，有事的那几天反而要往下翻
+ * - **今天没安排也列出来**：它是打开月历时眼睛找的锚点，
+ *   没有它就分不清「今天之前」和「今天之后」
+ */
+export function monthAgenda(cells: CalendarCell[]): AgendaDay[] {
+  return cells
+    .filter((cell) => cell.inMonth && (cell.events.length > 0 || cell.isToday))
+    .map((cell) => ({
+      ...cell,
+      weekday: WEEKDAY_LABELS[new Date(`${cell.date}T00:00:00Z`).getUTCDay()],
+    }));
+}
+
 /** 同一天里：会议按时刻排在前（有确定时间），上课紧随其后（占的是半天），其余按类型稳定排序 */
 const KIND_RANK: Record<CalendarEvent["kind"], number> = {
   meeting: 0,
@@ -97,7 +124,8 @@ const KIND_RANK: Record<CalendarEvent["kind"], number> = {
   // 截止类排在活动类后面、任务前面：同一天里先看「要去哪」，再看「要交什么」
   projectDeadline: 3,
   competition: 4,
-  taskDue: 5,
+  menteeMilestone: 5,
+  taskDue: 6,
 };
 
 export function sortEvents(events: CalendarEvent[]): CalendarEvent[] {

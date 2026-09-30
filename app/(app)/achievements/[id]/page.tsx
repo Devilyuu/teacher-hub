@@ -156,10 +156,13 @@ export default async function AchievementDetailPage({
                 : ` · 本栏上限 ${achievement.promotionCategory.cap} 分`}
             </span>
           </p>
-          {/* 赋分细则原样显示，不做任何解析——分数由人对着它自己填 */}
-          <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-            {achievement.promotionCategory.scoringRule}
-          </p>
+          {/* 赋分细则原样显示，不做任何解析——分数由人对着它自己填。
+              别的学校的表可能只有指标名、没有这一格 */}
+          {achievement.promotionCategory.scoringRule ? (
+            <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+              {achievement.promotionCategory.scoringRule}
+            </p>
+          ) : null}
           {achievement.promotionCategory.remark ? (
             <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
               备注：{achievement.promotionCategory.remark}
@@ -275,7 +278,13 @@ export default async function AchievementDetailPage({
           obsidianPath: achievement.obsidianPath,
           externalRef: achievement.externalRef,
           promotionCategoryId: achievement.promotionCategoryId,
+          promotionLabel: achievement.promotionCategory
+            ? `${achievement.promotionCategory.code} ${achievement.promotionCategory.minorIndicator}（${achievement.promotionCategory.year} 版）`
+            : null,
           perfCategoryId: achievement.perfCategoryId,
+          perfLabel: achievement.perfCategory
+            ? `${achievement.perfCategory.majorCategory} / ${achievement.perfCategory.minorCategory}（${achievement.perfCategory.year} 版）`
+            : null,
           // Decimal 过不了 Server Component 边界
           promotionScore:
             achievement.promotionScore == null ? null : Number(achievement.promotionScore),

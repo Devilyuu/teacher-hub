@@ -18,6 +18,12 @@ type UploadDependencies = {
   finalize(id: string, claimedAt: Date, data: { durationSec: number }): Promise<void>;
   discard(id: string, claimedAt: Date): Promise<void>;
   availableBytes(): Promise<number>;
+  /**
+   * 这个部署能不能把录音送去云端转写。桌面版不能（第一版不带 AI，lib/edition.ts）：
+   * 不要求「同意上传腾讯云」，也绝不记同意时间——以后哪天配上了密钥，这些录音也不会被悄悄送出去。
+   * 缺省按能处理，服务器版行为不变
+   */
+  cloudTranscription?: boolean;
   write(file: File, storagePath: string): Promise<{ absolutePath: string }>;
   probeMetadata(path: string): Promise<{ durationSec: number; voiceFormat: AudioVoiceFormat }>;
   remove(storagePath: string): Promise<void>;
@@ -32,7 +38,8 @@ export async function uploadMeetingRecording(
 ): Promise<{ id: string; status: "UPLOADED" }> {
   const meeting = await deps.getMeeting(meetingId);
   if (!meeting) throw new Error("会议不存在");
-  if (meeting.transcriptionEnabled && !cloudDisclosureAccepted) {
+  const cloud = deps.cloudTranscription ?? true;
+  if (cloud && meeting.transcriptionEnabled && !cloudDisclosureAccepted) {
     throw new Error("请先确认音频将上传到腾讯云做转写");
   }
 
@@ -56,7 +63,7 @@ export async function uploadMeetingRecording(
     mimeType: file.type,
     bytes: file.size,
     storagePath,
-    cloudConsentAt: cloudDisclosureAccepted ? new Date() : null,
+    cloudConsentAt: cloud && cloudDisclosureAccepted ? new Date() : null,
     quotaBytes: deps.quotaBytes,
   });
   try {

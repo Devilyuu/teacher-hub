@@ -1,10 +1,14 @@
+import { headers } from "next/headers";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { MobileMenu, MobileTabBar } from "@/components/mobile-nav";
 import { QuickCapture } from "@/components/quick-capture";
+import { SearchShortcut } from "@/components/search-shortcut";
 import { SideNav } from "@/components/side-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { isDesktopWindow } from "@/lib/edition";
 import { getEnabledModules } from "@/lib/module-settings";
+import { redirectToLoginUnlessSession } from "@/lib/server-auth";
 
 /**
  * 登录后的这一整组页面一律动态渲染，覆盖组内所有子路由。
@@ -29,16 +33,23 @@ export const dynamic = "force-dynamic";
 const SIDEBAR_INIT = `try{if(localStorage.getItem("sidebar")==="collapsed")document.documentElement.dataset.sidebar="collapsed"}catch(e){}`;
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  // 页面层的第二道门：proxy 的 matcher 放过 `*.png/*.svg` 结尾的路径，
+  // 没有这一句，`/projects/<id>.png` 会以未登录身份跑到页面查询代码
+  await redirectToLoginUnlessSession();
+
   // 模块开关决定导航长什么样。本组页面 force-dynamic，每请求读一次，
   // 设置页一保存导航立即变化，不存在缓存失效问题
   const modules = await getEnabledModules();
+  // 桌面版电脑上的窗口是主进程直接种的会话，没有「登录」这回事：点了退出只会落到一个要口令的登录页。
+  // 手机经「手机访问」进来的照常有退出（lib/edition.ts）
+  const showLogout = !isDesktopWindow((await headers()).get("user-agent"));
   return (
     <>
       <script dangerouslySetInnerHTML={{ __html: SIDEBAR_INIT }} />
       <div className="flex min-h-svh">
         {/* 2026-09-12 改版：导航从顶部胶囊换成左侧竖排。
             理由见 components/side-nav.tsx 顶部——是使用者变了，不是更好看 */}
-        <SideNav modules={modules} />
+        <SideNav modules={modules} showLogout={showLogout} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* 顶栏只剩「随时要用的动作」：搜索和速记。
@@ -49,17 +60,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <header className="sticky top-0 z-20 h-[var(--topbar-h)] border-b bg-background/85 backdrop-blur-md">
             <div className="flex h-full items-center gap-2 px-4 md:px-6">
               {/* 只在手机上出现：侧栏在 < 768px 整个隐藏，底栏放不下的入口都在这里 */}
-              <MobileMenu modules={modules} />
+              <MobileMenu modules={modules} showLogout={showLogout} />
               {/* 搜索做成一条真正的输入框样子而不是一个放大镜图标：
                   全局搜索是这平台第二常用的动作（仅次于速记），
                   藏成图标等于让人先想起"这里有搜索"才用得上 */}
               <Link
                 href="/search"
+                aria-keyshortcuts="/"
                 className="flex min-w-0 flex-1 items-center gap-2 rounded-full border bg-well px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground md:max-w-md"
               >
                 <Search className="size-4 shrink-0" aria-hidden />
                 <span className="truncate">搜索课题、成果、任务、学生…</span>
+                {/* 快捷键提示只在桌面给：手机没有键盘，那一格留给文字 */}
+                <kbd className="ml-auto hidden shrink-0 rounded border bg-background px-1.5 font-mono text-[11px] leading-5 md:inline">
+                  /
+                </kbd>
               </Link>
+              <SearchShortcut />
 
               <div className="ml-auto flex shrink-0 items-center gap-1">
                 {/* 快速记录常驻顶栏（规格 §4.2）：随时能记，不占一级导航位 */}

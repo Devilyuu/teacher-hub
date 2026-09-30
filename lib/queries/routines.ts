@@ -1,7 +1,9 @@
 import "server-only";
+import { cache } from "react";
 import { dateOnly, todayAsDateOnly } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { latestDueDate } from "@/lib/recurring";
+import { SELF_ASSIGNEE, todayQueueTasks } from "@/lib/tasks";
 
 /** 任务列表要的形状。关联课题只取显示用的两个字段 */
 const taskSelect = {
@@ -30,6 +32,70 @@ export async function getTasks() {
     select: taskSelect,
     orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
   });
+}
+
+/**
+ * 首页「今天要处理」：逾期的 + 今天到期的 + 高优先级未完成的，
+ * 口径与 `lib/tasks.ts` 的 `todayQueueTasks` 完全一致（那份纯函数仍是真相，
+ * 这里只是把同样的条件下沉到 SQL）。
+ *
+ * 原来首页调 `getTasks()` 把全表（含已完成、含课题 join）拉回来，只为裁出 8 条。
+ * 现在只取前 `limit` 条 + 总数；排序在库里做（优先级枚举的声明顺序就是 HIGH 在前），
+ * 取回后再过一遍 `todayQueueTasks` 保证两边永远一个口径。
+ */
+export async function getTodayQueueTasks(limit: number, now: Date = new Date()) {
+  const today = todayAsDateOnly(now);
+  const where = {
+    deletedAt: null,
+    status: { not: "DONE" as const },
+    // 等别人的不进「今天要处理」，它们在右栏自己那张卡上（口径同 todayQueueTasks）
+    assignee: { in: ["", SELF_ASSIGNEE] },
+    OR: [{ dueDate: { lte: today } }, { priority: "HIGH" as const }],
+  };
+  const [rows, total] = await Promise.all([
+    prisma.task.findMany({
+      where,
+      select: taskSelect,
+      orderBy: [
+        { dueDate: { sort: "asc", nulls: "last" } },
+        { priority: "asc" },
+        { createdAt: "desc" },
+      ],
+      take: limit,
+    }),
+    prisma.task.count({ where }),
+  ]);
+  return {
+    shown: todayQueueTasks(rows, now),
+    overflow: Math.max(0, total - rows.length),
+  };
+}
+
+/**
+ * 首页右栏「等别人」：没做完、负责人不是「我」的任务，按截止日排，
+ * 只取前 `limit` 条 + 总数。口径同 `lib/tasks.ts` 的 `isWaitingOn`。
+ * 负责人来源有三处：任务表单直接填、会议决议转任务带过来、轮派记录转任务写教师名。
+ */
+export async function getWaitingOnTasks(limit: number) {
+  const where = {
+    deletedAt: null,
+    status: { not: "DONE" as const },
+    NOT: { assignee: { in: ["", SELF_ASSIGNEE] } },
+  };
+  const [rows, total] = await Promise.all([
+    prisma.task.findMany({
+      where,
+      select: taskSelect,
+      orderBy: [
+        { dueDate: { sort: "asc", nulls: "last" } },
+        { priority: "asc" },
+        { createdAt: "desc" },
+      ],
+      take: limit,
+    }),
+    prisma.task.count({ where }),
+  ]);
+  return { shown: rows, overflow: Math.max(0, total - rows.length) };
 }
 
 /** 任务页头「回收站 · N」用。只要数字，不必把整批行取回来 */
@@ -142,7 +208,10 @@ export async function getMeetings() {
   });
 }
 
-export async function getMeetingDetail(id: string) {
+// generateMetadata 和页面各调一次；转写稿单条可上百 KB，同一请求只查一次
+export const getMeetingDetail = cache(getMeetingDetailUncached);
+
+async function getMeetingDetailUncached(id: string) {
   const meeting = await prisma.meeting.findUnique({
     where: { id },
     select: {
@@ -273,7 +342,9 @@ export async function getRoutineStats(now: Date = new Date()) {
   const weekStart = new Date(today.getTime() - dow * 86_400_000);
   const weekEnd = new Date(weekStart.getTime() + 7 * 86_400_000);
 
-  const [dueToday, overdue, weekMeetings, doneThisWeek, openTasks] = await Promise.all([
+  // 「本周完成 N 项 / 在办 N」那两条 count 随「本周动态」卡一起去掉了（2026-09-15）：
+  // 用户从不看它，右栏那一格换成了「等别人」
+  const [dueToday, overdue, weekMeetings] = await Promise.all([
     prisma.task.count({
       where: { deletedAt: null, status: { not: "DONE" }, dueDate: today },
     }),
@@ -281,11 +352,7 @@ export async function getRoutineStats(now: Date = new Date()) {
       where: { deletedAt: null, status: { not: "DONE" }, dueDate: { lt: today } },
     }),
     prisma.meeting.count({ where: { meetingTime: { gte: weekStart, lt: weekEnd } } }),
-    prisma.task.count({
-      where: { deletedAt: null, status: "DONE", completedAt: { gte: weekStart, lt: weekEnd } },
-    }),
-    prisma.task.count({ where: { deletedAt: null, status: { not: "DONE" } } }),
   ]);
 
-  return { dueToday, overdue, weekMeetings, doneThisWeek, openTasks };
+  return { dueToday, overdue, weekMeetings };
 }

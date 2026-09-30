@@ -34,7 +34,9 @@ export type SearchHit = {
     | "document"
     | "student"
     | "honor"
-    | "competition";
+    | "competition"
+    | "mentee"
+    | "menteeProject";
   id: string;
   title: string;
   /** 副标题：级别、年度、日期这类能帮人认出是哪一条的信息 */
@@ -74,6 +76,8 @@ export async function search(
       student: 0,
       honor: 0,
       competition: 0,
+      mentee: 0,
+      menteeProject: 0,
     },
   };
   // 一个字也能搜——中文里单字就是有效关键词（「奖」「专利」）
@@ -91,6 +95,8 @@ export async function search(
     students,
     honors,
     competitionEntries,
+    mentees,
+    menteeProjects,
   ] = await Promise.all([
     prisma.project.findMany({
       where: { OR: [{ title: like }, { shortTitle: like }, { code: like }, { note: like }] },
@@ -199,6 +205,58 @@ export async function search(
           },
           take: PER_KIND,
           orderBy: [{ year: "desc" }, { updatedAt: "desc" }],
+        })
+      : Promise.resolve([]),
+    // 学业导师（mentor，不是班主任 advisor）。班级原文也搜——
+    // 导师学生跨班，「数媒2301 那个谁」往往是唯一想得起来的线索
+    modules.mentor
+      ? prisma.mentee.findMany({
+          where: {
+            OR: [
+              { name: like },
+              { studentNo: like },
+              { className: like },
+              { phone: like },
+              { note: like },
+            ],
+          },
+          select: {
+            id: true,
+            name: true,
+            className: true,
+            active: true,
+            batch: { select: { id: true, name: true } },
+          },
+          take: PER_KIND,
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([]),
+    // 学生项目。**结项情况原文也搜**——「那个拿过优秀的毕设」是真场景，
+    // 而记得住的往往是那句原文不是题目
+    modules.mentor
+      ? prisma.menteeProject.findMany({
+          where: {
+            OR: [
+              { title: like },
+              { schoolYear: like },
+              { outcomeText: like },
+              { note: like },
+              { members: { some: { mentee: { name: like } } } },
+            ],
+          },
+          select: {
+            id: true,
+            title: true,
+            schoolYear: true,
+            kind: { select: { name: true } },
+            members: {
+              orderBy: { orderIndex: "asc" },
+              take: 1,
+              select: { mentee: { select: { name: true } } },
+            },
+          },
+          take: PER_KIND,
+          orderBy: { updatedAt: "desc" },
         })
       : Promise.resolve([]),
   ]);
@@ -327,6 +385,30 @@ export async function search(
           href: `/competitions/${row.id}`,
         }),
       ),
+      ...mentees.map(
+        (row): SearchHit => ({
+          kind: "mentee",
+          id: row.id,
+          title: row.name,
+          meta: [row.className, row.batch.name, row.active ? null : "已毕业"]
+            .filter(Boolean)
+            .join(" · "),
+          // 没有学生详情页（M1 不做），落到名单页并带上批次——
+          // 点过去至少停在他所在的那一批，而不是最近一届
+          href: `/mentees?batch=${encodeURIComponent(row.batch.id)}`,
+        }),
+      ),
+      ...menteeProjects.map(
+        (row): SearchHit => ({
+          kind: "menteeProject",
+          id: row.id,
+          title: row.title,
+          meta: [row.kind.name, row.members[0]?.mentee.name, row.schoolYear]
+            .filter(Boolean)
+            .join(" · "),
+          href: `/mentees/projects/${row.id}`,
+        }),
+      ),
     ],
     counts: {
       project: projects.length,
@@ -338,6 +420,8 @@ export async function search(
       student: students.length,
       honor: honors.length,
       competition: competitionEntries.length,
+      mentee: mentees.length,
+      menteeProject: menteeProjects.length,
     },
   };
 }

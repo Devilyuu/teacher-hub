@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compareIndicatorCode } from "@/lib/promotion";
+import { compareIndicatorCode, type PromotionCapRule } from "@/lib/promotion";
 import {
   buildPerformancePackage,
   buildPromotionPackage,
   filterForDeclaration,
+  withPromotionCaps,
   type ExportableAchievement,
 } from "./declaration";
 
@@ -249,35 +250,39 @@ describe("filterForDeclaration", () => {
     item({ id: "both-problems", year: null, isVerified: false }),
   ];
 
-  it("默认只收年度精确匹配且已核实的成果", () => {
-    expect(filterForDeclaration(candidates, 2026, "promotion").map((row) => row.id)).toEqual(["clean"]);
+  const ids = (rows: ExportableAchievement[]) => rows.map((row) => row.id);
+
+  it("绩效表默认只收年度精确匹配且已核实的成果", () => {
+    expect(ids(filterForDeclaration(candidates, 2026, "performance", null))).toEqual(["clean"]);
   });
 
   it("显式覆盖后可以包含未核实成果", () => {
     expect(
-      filterForDeclaration(candidates, 2026, "promotion", { includeUnverified: true }).map((row) => row.id),
+      ids(filterForDeclaration(candidates, 2026, "performance", null, { includeUnverified: true })),
     ).toEqual(["clean", "unverified"]);
   });
 
   it("显式覆盖后可以包含未分配年度成果", () => {
     expect(
-      filterForDeclaration(candidates, 2026, "promotion", { includeMissingYear: true }).map((row) => row.id),
+      ids(filterForDeclaration(candidates, 2026, "performance", null, { includeMissingYear: true })),
     ).toEqual(["clean", "missing-year"]);
   });
 
   it("两个覆盖开关同时打开才包含同时有两类问题的成果", () => {
     expect(
-      filterForDeclaration(candidates, 2026, "promotion", {
-        includeUnverified: true,
-        includeMissingYear: true,
-      }).map((row) => row.id),
+      ids(
+        filterForDeclaration(candidates, 2026, "performance", null, {
+          includeUnverified: true,
+          includeMissingYear: true,
+        }),
+      ),
     ).toEqual(["clean", "missing-year", "unverified", "both-problems"]);
   });
 
   it("2026 年起学校已奖励对象永久排除在绩效之外，安全覆盖也不能带入", () => {
     const rewarded = item({ id: "rewarded", schoolRewarded: true });
     expect(
-      filterForDeclaration([rewarded], 2026, "performance", {
+      filterForDeclaration([rewarded], 2026, "performance", null, {
         includeUnverified: true,
         includeMissingYear: true,
       }),
@@ -286,11 +291,103 @@ describe("filterForDeclaration", () => {
 
   it("学校奖励不影响职称评审导出", () => {
     const rewarded = item({ id: "rewarded", schoolRewarded: true });
-    expect(filterForDeclaration([rewarded], 2026, "promotion")).toHaveLength(1);
+    expect(filterForDeclaration([rewarded], 2027, "promotion", null)).toHaveLength(1);
   });
 
   it("不改写 2025 年及以前的二级学院绩效历史口径", () => {
     const rewarded = item({ id: "rewarded", year: 2025, schoolRewarded: true });
-    expect(filterForDeclaration([rewarded], 2025, "performance")).toHaveLength(1);
+    expect(filterForDeclaration([rewarded], 2025, "performance", null)).toHaveLength(1);
+  });
+});
+
+/**
+ * 职称表的 year 是**申报年度**，取「任现职以来 → 申报年度上一年 12-31」
+ * （附件2 说明第 2 条，和成果页职称口径同一个 promotionWindow）。
+ * 2026-09-25 以前这里也按年度精确匹配：「2026 年度职称包」只有 2026 年那几条，
+ * 按规定它们恰好一条都不算，此前几年的又全被漏掉
+ */
+describe("filterForDeclaration · 职称表按任现职时间窗", () => {
+  const since = new Date(Date.UTC(2020, 8, 1));
+  const byYear = [2019, 2020, 2023, 2026, 2027].map((year) => item({ id: `y${year}`, year }));
+  const ids = (rows: ExportableAchievement[]) => rows.map((row) => row.id);
+
+  it("按申报年度取任现职当年到上一年，申报当年的不算", () => {
+    expect(ids(filterForDeclaration(byYear, 2027, "promotion", since))).toEqual([
+      "y2020",
+      "y2023",
+      "y2026",
+    ]);
+  });
+
+  it("档案没填任现职日期时只卡上限，不猜起点", () => {
+    expect(ids(filterForDeclaration(byYear, 2027, "promotion", null))).toEqual([
+      "y2019",
+      "y2020",
+      "y2023",
+      "y2026",
+    ]);
+  });
+
+  it("绩效表不看任现职日期，照旧按成果年度精确匹配", () => {
+    expect(ids(filterForDeclaration(byYear, 2026, "performance", since))).toEqual(["y2026"]);
+  });
+
+  it("缺年度、未核实在职称表同样只有显式覆盖才进", () => {
+    const messy = [
+      item({ id: "missing-year", year: null }),
+      item({ id: "unverified", year: 2024, isVerified: false }),
+    ];
+    expect(filterForDeclaration(messy, 2027, "promotion", since)).toEqual([]);
+    expect(
+      ids(
+        filterForDeclaration(messy, 2027, "promotion", since, {
+          includeUnverified: true,
+          includeMissingYear: true,
+        }),
+      ),
+    ).toEqual(["missing-year", "unverified"]);
+  });
+});
+
+describe("withPromotionCaps", () => {
+  const rules: PromotionCapRule[] = [
+    { code: "4.5", majorIndicator: "教育教学", minorIndicator: "指导学生获奖", majorCap: 60, cap: 9, capGroup: "4.5+4.6" },
+    { code: "4.6", majorIndicator: "教育教学", minorIndicator: "毕业设计奖", majorCap: 60, cap: 9, capGroup: "4.5+4.6" },
+  ];
+  const award = (id: string, code: string, score: number) =>
+    item({
+      id,
+      sourceId: id,
+      promotionCategory: { code, majorIndicator: "教育教学", minorIndicator: code },
+      promotionScore: score,
+    });
+
+  /** CLAUDE.md 导师模块那条：参赛和毕设在职称口径下抢同一个 9 分 */
+  it("按编号小计后套封顶，明细和原始合计不动", () => {
+    const pkg = withPromotionCaps(
+      buildPromotionPackage(
+        [award("a", "4.5", 4), award("b", "4.5", 3), award("c", "4.6", 5)],
+        2027,
+        compareIndicatorCode,
+      ),
+      rules,
+    );
+    expect(pkg.total).toBe(12);
+    expect(pkg.groups.flatMap((group) => group.rows.map((row) => row.score))).toEqual([4, 3, 5]);
+    expect(pkg.caps).toMatchObject({
+      rawTotal: 12,
+      cappedTotal: 9,
+      overCap: [{ label: "4.5+4.6", raw: 12, cap: 9 }],
+    });
+  });
+
+  it("没导入过职称表（规则为空）时不截，不带 caps", () => {
+    const pkg = buildPromotionPackage([award("a", "4.5", 12)], 2027, compareIndicatorCode);
+    expect(withPromotionCaps(pkg, [])).toBe(pkg);
+  });
+
+  it("绩效包不套职称封顶", () => {
+    const pkg = buildPerformancePackage([item()], 2026);
+    expect(withPromotionCaps(pkg, rules).caps).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import type { Prisma } from "@/lib/generated/prisma/client";
+import "server-only";
 import { prisma } from "@/lib/db";
 
 type ActivityClient = {
@@ -36,8 +37,17 @@ export async function logActivity(
     | "StudentHonor"
     // 指导参赛模块
     | "CompetitionEntry"
+    // 学业导师模块（mentor，不是班主任 advisor）。指导记录汇总表导出记在
+    // 批次上，理由同 ClassGroup：不给 ExportKind 加不可回滚的枚举值
+    | "MenteeBatch"
+    | "MenteeProject"
     // 课表导入记在学期上：课表条目整表覆盖、没有稳定的实体可指
-    | "Semester",
+    | "Semester"
+    // 职称表与绩效表（设置页）。整表导入、整表删除记在「表」上，entityId 写
+    // `promotion:2026` / `perf:2025`——两张表没有共同的实体可指；单条增改删记在分类本身上
+    | "RuleTable"
+    | "PromotionCategory"
+    | "PerfCategory",
   entityId: string,
   action: string,
   detail?: Prisma.InputJsonValue,

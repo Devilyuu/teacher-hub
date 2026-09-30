@@ -14,6 +14,10 @@ export const SEARCH_GROUPS: Array<{ kind: SearchHit["kind"]; label: string }> = 
   // 班主任模块（关闭时查询不会执行，这两组自然为空）
   { kind: "student", label: "学生" },
   { kind: "honor", label: "学生荣誉" },
+  // 学业导师模块。**组名是「导师学生」不是「学生」**——上面那一组已经叫
+  // 「学生」了，两组同名的话，搜出来的人在哪个模块里根本分不清
+  { kind: "mentee", label: "导师学生" },
+  { kind: "menteeProject", label: "学生项目" },
 ];
 
 export const SEARCH_COPY = {

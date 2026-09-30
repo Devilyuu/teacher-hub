@@ -96,22 +96,26 @@ const exportItems: ExportableAchievement[] = [
   },
 ];
 
-const preflightItems: PreflightAchievement[] = exportItems.map((item) => ({
-  id: item.id,
-  sourceKind: item.sourceKind,
-  sourceId: item.sourceId,
-  href: item.href,
-  schoolRewarded: item.schoolRewarded,
-  title: item.title,
-  year: item.year,
-  isVerified: item.isVerified,
-  status: "PUBLISHED",
-  attachmentCount: item.attachmentCount,
-  perfCategoryId: item.perfCategory == null ? null : `perf-${item.id}`,
-  promotionCategoryId: item.promotionCategory == null ? null : `promo-${item.id}`,
-  declaredScore: item.declaredScore,
-  promotionScore: item.promotionScore,
-}));
+function toPreflight(item: ExportableAchievement): PreflightAchievement {
+  return {
+    id: item.id,
+    sourceKind: item.sourceKind,
+    sourceId: item.sourceId,
+    href: item.href,
+    schoolRewarded: item.schoolRewarded,
+    title: item.title,
+    year: item.year,
+    isVerified: item.isVerified,
+    status: "PUBLISHED",
+    attachmentCount: item.attachmentCount,
+    perfCategoryId: item.perfCategory == null ? null : `perf-${item.id}`,
+    promotionCategoryId: item.promotionCategory == null ? null : `promo-${item.id}`,
+    declaredScore: item.declaredScore,
+    promotionScore: item.promotionScore,
+  };
+}
+
+const preflightItems: PreflightAchievement[] = exportItems.map(toPreflight);
 
 const cases: Array<{
   label: string;
@@ -142,17 +146,47 @@ const cases: Array<{
   },
 ];
 
+/** 职称表的年份是申报年度：按 2027 年申报，时间窗算到 2026-12-31，上面那批 2026 年的正好在窗里 */
+const yearFor = (kind: DeclarationKind) => (kind === "promotion" ? 2027 : 2026);
+
 describe("预检与组表交叉验证", () => {
   it.each(cases)("$label 的纳入条数逐条一致", ({ kind, options }) => {
-    const scoped = filterForDeclaration(exportItems, 2026, kind, options);
+    const year = yearFor(kind);
+    const scoped = filterForDeclaration(exportItems, year, kind, null, options);
     const pkg =
       kind === "promotion"
-        ? buildPromotionPackage(scoped, 2026, compareIndicatorCode)
-        : buildPerformancePackage(scoped, 2026);
+        ? buildPromotionPackage(scoped, year, compareIndicatorCode)
+        : buildPerformancePackage(scoped, year);
     const exportedCount = pkg.groups.reduce((count, group) => count + group.rows.length, 0);
 
-    expect(preflightDeclaration(preflightItems, 2026, kind, options).includedCount).toBe(
+    expect(exportedCount).toBeGreaterThan(0);
+    expect(preflightDeclaration(preflightItems, year, kind, null, options).includedCount).toBe(
       exportedCount,
     );
+  });
+
+  /** 任现职日期卡掉一部分时，预检和组表也必须卡掉同样的那几条 */
+  it.each([
+    { label: "安全默认", options: {}, expected: 2 },
+    { label: "包含缺年度", options: { includeMissingYear: true }, expected: 3 },
+  ])("职称表带任现职日期时两边逐条一致：$label", ({ options, expected }) => {
+    const since = new Date(Date.UTC(2024, 8, 1));
+    // 2023 在任现职之前、2027 是申报当年，都不该进；2024、2026 在窗里；null 看开关
+    const spread = [2023, 2024, 2026, 2027, null].map((year) => ({
+      ...exportItems[0],
+      id: `y${year}`,
+      sourceId: `y${year}`,
+      href: `/achievements/y${year}`,
+      year,
+    }));
+    const scoped = filterForDeclaration(spread, 2027, "promotion", since, options);
+    const pkg = buildPromotionPackage(scoped, 2027, compareIndicatorCode);
+    const exportedCount = pkg.groups.reduce((count, group) => count + group.rows.length, 0);
+
+    expect(exportedCount).toBe(expected);
+    expect(
+      preflightDeclaration(spread.map(toPreflight), 2027, "promotion", since, options)
+        .includedCount,
+    ).toBe(exportedCount);
   });
 });

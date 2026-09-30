@@ -4,8 +4,9 @@ import { ChevronLeft } from "lucide-react";
 import { formatDateOnly, todayAsDateOnly } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { getTimetableSlots } from "@/lib/queries/timetable";
-import { homeTimetableWeek } from "@/lib/timetable";
+import { buildWeekTimetable, homeTimetableWeek, resolveBrowseWeek } from "@/lib/timetable";
 import { TimetablePanel, type TimetableSemesterRow, type TimetableSlotRow } from "./timetable-panel";
+import { TimetableWeekBrowser } from "./week-browser";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export default async function TimetableSettingsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const today = todayAsDateOnly();
   const semesters = await prisma.semester.findMany({
     orderBy: { startDate: "desc" },
     select: { id: true, name: true, startDate: true, _count: { select: { timetable: true } } },
@@ -30,7 +32,7 @@ export default async function TimetableSettingsPage({
 
   // 默认选首页正在显示的那个学期；假期里没有就选最新的
   const requested = typeof params.semester === "string" ? params.semester : null;
-  const homeWeek = homeTimetableWeek(semesters, todayAsDateOnly());
+  const homeWeek = homeTimetableWeek(semesters, today);
   const selected =
     semesters.find((semester) => semester.id === requested) ??
     semesters.find((semester) => semester.id === homeWeek?.semester.id) ??
@@ -38,6 +40,13 @@ export default async function TimetableSettingsPage({
     null;
 
   const slots = selected ? await getTimetableSlots(selected.id) : [];
+
+  // 翻周视图要显示哪一周：默认今天所在的那一周，URL 上的 week 夹到量程内
+  const browse = selected
+    ? resolveBrowseWeek(slots, selected.startDate, today, typeof params.week === "string" ? params.week : null)
+    : null;
+  const weekTable =
+    selected && browse ? buildWeekTimetable(slots, selected.startDate, browse.week, today) : null;
 
   const semesterRows: TimetableSemesterRow[] = semesters.map((semester) => ({
     id: semester.id,
@@ -69,10 +78,20 @@ export default async function TimetableSettingsPage({
         <h1 className="page-title">课表</h1>
         <p className="measure text-muted-foreground">
           把教务系统导出的课表传上来，首页就会显示本周哪几个半天有课，月历上也会铺上上课的日子。
-          <span className="text-foreground">导入按学期整表覆盖</span>
+          下面可以<span className="text-foreground">按周翻看整学期</span>
+          ，每节课带上课地点。<span className="text-foreground">导入按学期整表覆盖</span>
           ，调课了重新导一次即可；临时改一两节也可以在下面手工补。
         </p>
       </header>
+
+      {selected && browse && weekTable && slots.length > 0 ? (
+        <TimetableWeekBrowser
+          semesterId={selected.id}
+          semesterName={selected.name}
+          table={weekTable}
+          browse={browse}
+        />
+      ) : null}
 
       <TimetablePanel
         semesters={semesterRows}

@@ -165,7 +165,7 @@ export function DutyPanel({
               <Input id="note" name="note" />
             </div>
 
-            {/* 默认不建任务：排班表本身就是记录，多数排班不需要变成待办 */}
+            {/* 默认不建任务：轮派记录本身就是记录，多数轮派不需要变成待办 */}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" name="generateTasks" className="size-4" />
               同时给每个参与人建一条任务
@@ -190,7 +190,7 @@ export function DutyPanel({
           <div className="flex justify-end">
             <Button type="button" onClick={() => setCreating(true)}>
               <Plus className="size-4" aria-hidden />
-              新增排班
+              新增轮派
             </Button>
           </div>
         )}
@@ -199,7 +199,7 @@ export function DutyPanel({
           types.length > 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-3xl bg-well p-12 text-center">
               <ClipboardArt className="size-12 text-muted-foreground/60" />
-              <p className="text-sm text-muted-foreground">还没有排班记录。</p>
+              <p className="text-sm text-muted-foreground">还没有轮派记录。</p>
             </div>
           ) : null
         ) : (
@@ -333,23 +333,19 @@ export function DutyPanel({
                       {teacher.active ? "停用" : "启用"}
                     </Button>
                   </form>
-                  {/* 有记录的只停用不删——删了会把历史排班里的人名一并抹掉 */}
-                  <form action={deleteTeacher.bind(null, teacher.id)}>
-                    <Button
-                      type="submit"
-                      variant="ghost"
+                  {/* 有轮派记录的只能停用不能删——删了会把历史记录里的人名一并抹掉。
+                      原来按钮照样画、点了却悄悄变成停用，差别只写在悬停提示里，
+                      手机上根本看不见；现在有记录就不给删除按钮 */}
+                  {teacher.recordCount === 0 ? (
+                    <ConfirmSubmitButton
+                      action={deleteTeacher.bind(null, teacher.id)}
+                      message={`删除教师「${teacher.name}」？没有轮派记录，删掉就没有了。`}
                       size="icon-sm"
-                      className="text-muted-foreground"
-                      title={
-                        teacher.recordCount > 0
-                          ? "有排班记录，将改为停用"
-                          : "删除"
-                      }
-                      aria-label={`删除 ${teacher.name}`}
+                      label={`删除 ${teacher.name}`}
                     >
                       <Trash2 className="size-3" aria-hidden />
-                    </Button>
-                  </form>
+                    </ConfirmSubmitButton>
+                  ) : null}
                 </li>
               ))}
             </ul>

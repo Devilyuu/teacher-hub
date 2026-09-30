@@ -13,6 +13,7 @@ import {
   type OutcomeFilters,
   sumNumericScore,
 } from "@/lib/outcomes/filters";
+import type { PerformanceEntryGroup } from "@/lib/outcomes/grouping";
 import type { UnifiedOutcomeRow } from "@/lib/outcomes/types";
 import {
   displayOutcomeYears,
@@ -32,6 +33,8 @@ type OutcomeRowProps = {
   filters: Pick<OutcomeFilters, "year" | "major" | "minor" | "unverifiedOnly">;
   promotionOptions: PromotionOption[];
   perfOptions: PerfOption[];
+  /** 列表分组时这一行所在的组，见 lib/outcomes/grouping.ts */
+  entryGroup?: PerformanceEntryGroup | null;
 };
 
 /**
@@ -44,13 +47,11 @@ type OutcomeRowProps = {
 function AttachmentCount({ count }: { count: number }) {
   return (
     <span
-      className={cn(
-        "inline-flex items-center gap-1 text-xs tabular-nums",
-        count === 0 ? "text-muted-foreground/50" : "text-muted-foreground",
-      )}
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
       title={count === 0 ? "还没有材料" : `${count} 份材料`}
     >
-      <Paperclip className="size-3" aria-hidden />
+      {/* 0 的时候只把回形针调淡，数字不调：数字是文字，叠透明度就不够 4.5:1 了 */}
+      <Paperclip className={cn("size-3", count === 0 && "opacity-50")} aria-hidden />
       {count}
     </span>
   );
@@ -63,11 +64,13 @@ export function OutcomeRow({
   filters,
   promotionOptions,
   perfOptions,
+  entryGroup,
 }: OutcomeRowProps) {
   const view = outcomeRowViewModel(row, {
     scope,
     currentOutcomePath,
     filters,
+    entryGroup,
   });
   const promotion = scope === "promotion";
   // 和右侧面板共用同一套算法：面板里的年度/日期必须和它旁边这一行对得上
@@ -218,7 +221,7 @@ export function OutcomeRow({
             </span>
           ))}
           {row.tags.map((tag) => (
-            <span key={tag} className="text-muted-foreground/70">
+            <span key={tag} className="text-muted-foreground">
               #{tag}
             </span>
           ))}

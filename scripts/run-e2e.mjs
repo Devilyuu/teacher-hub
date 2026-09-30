@@ -13,6 +13,7 @@ import {
   buildE2eChildEnv,
   chooseE2eFinalOutcome,
   containerLabelsMatch,
+  isDotenvTemplateName,
   quoteDatabaseIdentifier,
   runCleanupSteps,
   startAbortableChild,
@@ -200,10 +201,11 @@ function delay(ms) {
 async function rejectDotenvFiles() {
   const entries = await readdir(cwd, { withFileTypes: true });
   assertNoLoadableDotenvFiles(entries);
-  const example = entries.find((entry) => entry.name === ".env.example");
-  if (example) {
-    const stat = await lstat(join(cwd, example.name));
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("E2E runner refuses non-ordinary .env.example");
+  for (const template of entries.filter((entry) => isDotenvTemplateName(entry.name))) {
+    const stat = await lstat(join(cwd, template.name));
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`E2E runner refuses non-ordinary ${template.name}`);
+    }
   }
 }
 

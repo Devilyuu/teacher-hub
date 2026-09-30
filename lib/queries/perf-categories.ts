@@ -1,7 +1,8 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import type { PerfRuleColumns } from "@/lib/perf-rules";
-import { PROJECT_PERF_MINORS } from "@/lib/project-performance";
+import { projectEligibleOf } from "@/lib/project-eligibility";
 
 export type PerfOption = {
   id: string;
@@ -22,7 +23,9 @@ export type PerfOption = {
  * 学校每年发新表时导入脚本写一个新年度，旧年度保留（历史成果按当年规则解释），
  * 但录入界面只用最新的一版。口径同 currentPromotionYear。
  */
-export async function currentPerfYear(): Promise<number | null> {
+export const currentPerfYear = cache(currentPerfYearUncached);
+
+async function currentPerfYearUncached(): Promise<number | null> {
   const latest = await prisma.perfCategory.findFirst({
     orderBy: { year: "desc" },
     select: { year: true },
@@ -67,7 +70,9 @@ export async function getPerfOptions(): Promise<PerfOption[]> {
 }
 
 /**
- * 课题绩效事项用的候选规则——课题这件事在绩效表上的几个去处。
+ * 课题绩效事项用的候选规则——课题这件事在绩效表上的几个去处：
+ * 当前年度、启用中、分类表里勾了「课题可挂」的小类；一项都没勾时是全部启用中的小类
+ * （`projectEligibleOf`）。写库时的校验走同一个函数（project-performance-actions.ts）。
  *
  * **只列候选，不替人选。** 「纵向课题 → 纵向课题（教科研）」看着理所当然，
  * 但那正是 CLAUDE.md 第 11 条禁止的映射函数：学校哪年把这两格合并或拆细，
@@ -81,7 +86,7 @@ export async function getProjectPerformanceRules() {
   if (year == null) return [];
 
   const rows = await prisma.perfCategory.findMany({
-    where: { year, isActive: true, minorCategory: { in: [...PROJECT_PERF_MINORS] } },
+    where: { year, isActive: true },
     orderBy: { sortOrder: "asc" },
     select: {
       id: true,
@@ -95,7 +100,8 @@ export async function getProjectPerformanceRules() {
       schoolRule: true,
       collegeRule: true,
       remark: true,
+      projectEligible: true,
     },
   });
-  return rows;
+  return projectEligibleOf(rows);
 }

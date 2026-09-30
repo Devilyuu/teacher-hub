@@ -3,6 +3,7 @@ import {
   buildMonthGrid,
   daysFromToday,
   formatMonthParam,
+  monthAgenda,
   monthRange,
   parseMonthParam,
   shiftMonth,
@@ -71,6 +72,52 @@ describe("buildMonthGrid", () => {
     const cell = cells.find((c) => c.date === "2026-06-30");
     expect(cell?.inMonth).toBe(false);
     expect(cell?.events).toHaveLength(1);
+  });
+});
+
+describe("monthAgenda", () => {
+  it("只留本月有安排的日子，带上周几", () => {
+    const cells = buildMonthGrid(
+      2026,
+      7,
+      [
+        event({ id: "a", date: "2026-07-08" }),
+        event({ id: "b", date: "2026-07-15", kind: "taskDue", title: "交材料" }),
+      ],
+      NOW,
+    );
+    const agenda = monthAgenda(cells);
+    expect(agenda.map((day) => [day.date, day.weekday, day.events.length])).toEqual([
+      ["2026-07-08", "周三", 1],
+      ["2026-07-15", "周三", 1],
+      // 今天（07-28）没安排也列：它是打开月历时找的锚点
+      ["2026-07-28", "周二", 0],
+    ]);
+  });
+
+  it("补齐格上的事件不进列表——列表没有网格错位的问题", () => {
+    // 2026-06-30 是 7 月网格最前面的补齐格
+    const cells = buildMonthGrid(2026, 7, [event({ date: "2026-06-30" })], NOW);
+    expect(monthAgenda(cells).map((day) => day.date)).toEqual(["2026-07-28"]);
+  });
+
+  it("看别的月份时没有今天那一行，没安排就是空列表", () => {
+    const cells = buildMonthGrid(2026, 9, [], NOW);
+    expect(monthAgenda(cells)).toEqual([]);
+  });
+
+  it("同一天的条目和网格里是同一份、同一个顺序", () => {
+    const cells = buildMonthGrid(
+      2026,
+      7,
+      [
+        event({ id: "task", date: "2026-07-08", kind: "taskDue" }),
+        event({ id: "meet", date: "2026-07-08", kind: "meeting", time: "14:00" }),
+      ],
+      NOW,
+    );
+    const inGrid = cells.find((cell) => cell.date === "2026-07-08")!.events;
+    expect(monthAgenda(cells)[0].events).toEqual(inGrid);
   });
 });
 

@@ -39,7 +39,8 @@ test("参赛获奖引用为成果后，成果详情能跳回那次参赛", async
   const entryUrl = new URL(page.url()).pathname;
 
   await page.getByRole("button", { name: "引用为成果" }).click();
-  await expect(page.getByText("已引用为成果")).toBeVisible();
+  // exact：删除区那句说明也以「已引用为成果」开头，不精确匹配会撞上 strict mode
+  await expect(page.getByText("已引用为成果", { exact: true })).toBeVisible();
 
   // 奖状原文原样进标题——评审核对的就是这行字
   const achievementLink = page.getByRole("link", { name: "指导学生获省一等奖" });
@@ -64,6 +65,8 @@ test("成果页默认职称口径会说清还有多少条没显示，并能一�
   await page.goto("/login");
   await page.locator('input[name="passcode"]').fill(passcode);
   await page.getByRole("button", { name: "进入" }).click();
+  // 等登录落地再跳：不等的话 goto 抢在会话 cookie 写好之前，被弹回登录页
+  await expect(page).toHaveURL(/\/$/);
 
   // 造一条没挂职称指标的成果——这正是「新建完在默认口径下看不见」那种
   await page.goto("/achievements/new");
@@ -77,5 +80,7 @@ test("成果页默认职称口径会说清还有多少条没显示，并能一�
 
   await page.getByRole("link", { name: "切到「全部」" }).click();
   await expect(page).toHaveURL(/scope=all/);
-  await expect(page.getByText("口径提示验证用成果").first()).toBeVisible();
+  // 找表格行，别用 getByText().first()：手机摘要列表和桌面表格两份都渲染、靠 CSS 切，
+  // 桌面视口下排在前面的那份手机摘要是隐藏的
+  await expect(page.getByRole("row").filter({ hasText: "口径提示验证用成果" })).toBeVisible();
 });

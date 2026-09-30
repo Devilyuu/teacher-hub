@@ -5,6 +5,7 @@ import { InboxTrayArt } from "@/components/empty-art";
 import { Button } from "@/components/ui/button";
 import { formatDateOnly } from "@/lib/date";
 import { prisma } from "@/lib/db";
+import { isDesktopEdition } from "@/lib/edition";
 import { teachingAppUrl } from "@/lib/integrations";
 import { ModuleDisabledNotice } from "@/components/module-disabled";
 import { isModuleEnabled } from "@/lib/module-settings";
@@ -97,6 +98,12 @@ export default async function TeachingPage() {
                 打开备课系统
               </Button>
             </>
+          ) : isDesktopEdition() ? (
+            // 桌面版装在老师自己的电脑上，独立部署的备课系统够不着、回流也进不来——
+            // 所以桌面版第一次启动就把这个模块关了（desktop/src/defaults.ts），手动勾上的才会看到这句
+            <p className="measure text-sm leading-relaxed text-muted-foreground">
+              桌面版连不上独立部署的备课系统，教案也回流不进来。这一页只显示以前回流进来的教案。
+            </p>
           ) : (
             <>
               <div className="space-y-1.5">

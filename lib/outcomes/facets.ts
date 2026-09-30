@@ -9,8 +9,18 @@ import {
   type OutcomeFilters,
   type OutcomeTypeFilter,
 } from "@/lib/outcomes/filters";
-import type { PerformanceEntry, UnifiedOutcomeRow } from "@/lib/outcomes/types";
-import { compareIndicatorCode, type PromotionWindow } from "@/lib/promotion";
+import type {
+  PerformanceEntry,
+  ProjectOutcomeRow,
+  UnifiedOutcomeRow,
+} from "@/lib/outcomes/types";
+import {
+  applyPromotionCaps,
+  compareIndicatorCode,
+  type PromotionCapResult,
+  type PromotionCapRule,
+  type PromotionWindow,
+} from "@/lib/promotion";
 
 export type Facet<TValue> = { value: TValue; count: number };
 
@@ -301,6 +311,23 @@ export function scoreWithoutPromotionCategoryCount(
   ).length;
 }
 
+/**
+ * 一条绩效事项都没登记过的课题——它们在绩效口径下一行也不出现。
+ *
+ * 申报（哪怕没中）、立项、到账、结题在绩效里各自算分，但那是
+ * `ProjectPerformanceEvent` 里的人工登记，不从课题状态推导（CLAUDE.md 第 1 条：
+ * 只计算不判定）。所以这里**只报「从没登记过」这个事实**，不去猜「哪一年该有哪一条」：
+ * 课题的申报日期大半是空的，开始日又常是 1 月 1 日的占位，拿它们推年度就是猜。
+ */
+export function projectsWithoutPerformanceEntries(
+  rows: UnifiedOutcomeRow[],
+): ProjectOutcomeRow[] {
+  return rows.filter(
+    (row): row is ProjectOutcomeRow =>
+      row.kind === "PROJECT" && row.performanceEntries.length === 0,
+  );
+}
+
 /** 有分却没挂一级指标的行，在堆叠条里归到这一档（放最后） */
 export const PROMOTION_SCORE_UNCATEGORIZED = "未挂指标";
 
@@ -348,4 +375,31 @@ export function promotionScoreComposition(
     .map(([major, score]) => ({ major, score }))
     .sort((a, b) => rank(a.major) - rank(b.major));
   return { slices, deducted };
+}
+
+/**
+ * 筛选后的职称行按量化表封顶核算（`applyPromotionCaps`），给「职称量化分合计」旁边的
+ * 「封顶后」用。和导出职称表是同一个函数、同一份规则（当前那版表）。
+ *
+ * 只收挂了指标、填了分的行：没挂指标的分本来就进不了职称表，
+ * 那笔账由「填了分却没挂指标」那条提示管
+ */
+export function promotionCapsOf(
+  rows: UnifiedOutcomeRow[],
+  rules: ReadonlyArray<PromotionCapRule>,
+): PromotionCapResult {
+  return applyPromotionCaps(
+    rows.flatMap((row) =>
+      row.promotionCategory == null || row.promotionScore == null
+        ? []
+        : [
+            {
+              code: row.promotionCategory.code,
+              majorIndicator: row.promotionCategory.majorIndicator,
+              score: Number(row.promotionScore),
+            },
+          ],
+    ),
+    rules,
+  );
 }

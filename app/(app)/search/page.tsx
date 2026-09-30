@@ -34,14 +34,17 @@ export default async function SearchPage({
       </header>
 
       {/* 原生 form + GET：搜索结果要能被收藏、能后退，所以走 URL 而不是客户端状态 */}
-      <form action="/search" className="flex gap-2">
+      {/* role="search" + type="search"：读屏能认出这是搜索区，手机键盘的回车键会变成「搜索」 */}
+      <form action="/search" role="search" className="flex gap-2">
         <div className="relative flex-1">
           <Search
             className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
+            type="search"
             name="q"
+            aria-label="搜索"
             defaultValue={query}
             placeholder={SEARCH_COPY.placeholder}
             className="pl-9"
@@ -60,13 +63,13 @@ export default async function SearchPage({
       ) : total === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-3xl bg-well p-14 text-center">
           <MagnifierArt className="size-12 text-muted-foreground/60" />
-          <p className="text-sm text-muted-foreground">
+          <p role="status" className="text-sm text-muted-foreground">
             没有找到「{query}」相关的内容。
           </p>
         </div>
       ) : (
         <>
-          <p className="px-1 text-sm text-muted-foreground">
+          <p role="status" className="px-1 text-sm text-muted-foreground">
             找到{" "}
             <span className="font-medium tabular-nums text-foreground">
               {total}

@@ -3,6 +3,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { auditPayload, teachingImportPayloadSchema } from "@/lib/schemas/teaching-import";
 import {
   MAX_UPLOAD_BYTES,
+  clampUploadFilename,
   deleteUpload,
   isAllowedUpload,
   saveUpload,
@@ -229,7 +230,7 @@ async function attachFile(
       data: {
         teachingImportId,
         kind: "TEACHING_PLAN",
-        filename: file.name,
+        filename: clampUploadFilename(file.name),
         storagePath: saved.storagePath,
         size: saved.size,
         mimeType: file.type || "application/octet-stream",

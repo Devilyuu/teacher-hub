@@ -16,7 +16,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // 业务测试放 lib/；静态部署验证器的纯 helper 测试放 scripts/。
-    include: ["lib/**/*.test.ts", "scripts/**/*.test.mjs"],
+    // 业务测试放 lib/；静态部署验证器的纯 helper 测试放 scripts/；
+    // 桌面壳里不引 electron 的模块，测试就放在它旁边（desktop/src），桌面版自己的 tsc 不编它们。
+    include: ["lib/**/*.test.ts", "scripts/**/*.test.mjs", "desktop/src/**/*.test.ts"],
   },
 });

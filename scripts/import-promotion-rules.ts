@@ -12,6 +12,9 @@
  *
  * 注意这张表与 PerfCategory 是**两套坐标系**，不是一套的两种叫法：
  * 那张是二级学院分钱用的，这张是人事处评职称用的（schema 里有详细说明）。
+ *
+ * 2026-09-27 起设置页也能导（粘贴表格、导入规则包），写库走的是同一个
+ * `applyPromotionPlan`（lib/rules/apply.ts）：只增改不删，文件里没写的「课题可挂」保留原值。
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
@@ -24,6 +27,7 @@ import {
   SERIES_LABELS,
   type TitleSeriesValue,
 } from "../lib/import/promotion-rules";
+import { applyPromotionPlan } from "../lib/rules/apply";
 
 const DEFAULT_SOURCE = "prisma/data/promotion-rules-2026.json";
 const apply = process.argv.includes("--apply");
@@ -55,9 +59,8 @@ async function main() {
   console.log(`一级指标 ${majors.length} 个：`);
   for (const major of majors) {
     const rows = drafts.filter((d) => d.majorIndicator === major);
-    console.log(
-      `  ${String(rows.length).padStart(2)} 项　${major}（封顶 ${rows[0].majorCap} 分）`,
-    );
+    const cap = rows[0].majorCap == null ? "不设封顶" : `封顶 ${rows[0].majorCap} 分`;
+    console.log(`  ${String(rows.length).padStart(2)} 项　${major}（${cap}）`);
   }
 
   console.log(`\n逐条（系列记号顺序：${Object.values(SERIES_LABELS).join(" / ")}）：`);
@@ -73,7 +76,7 @@ async function main() {
   console.log("\n封顶校验（这是判断 PDF 里散落的备注有没有配错指标的唯一依据）：");
   for (const c of checks) {
     console.log(
-      `  ${c.ok ? "✓" : "✗"} ${c.label}：附件写 ${c.expected}，各栏封顶相加 ${c.actual}`,
+      `  ${c.ok ? "✓" : "✗"} ${c.label}：表上写 ${c.expected}，各栏封顶相加 ${c.actual}`,
     );
   }
 
@@ -94,28 +97,7 @@ async function main() {
     return;
   }
 
-  await prisma.promotionRuleset.upsert({
-    where: { year: head.year },
-    create: head,
-    update: { ...head, year: undefined },
-  });
-
-  let created = 0;
-  let updated = 0;
-  for (const draft of drafts) {
-    const { year, code, ...rest } = draft;
-    const existing = await prisma.promotionCategory.findUnique({
-      where: { year_code: { year, code } },
-      select: { id: true },
-    });
-    await prisma.promotionCategory.upsert({
-      where: { year_code: { year, code } },
-      create: draft,
-      update: rest,
-    });
-    if (existing) updated += 1;
-    else created += 1;
-  }
+  const { created, updated } = await prisma.$transaction((tx) => applyPromotionPlan(tx, { head, drafts }));
 
   console.log(`\n已写入：新建 ${created} 条，更新 ${updated} 条。`);
 }

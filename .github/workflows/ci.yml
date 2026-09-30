@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 24, cache: npm }
+        with: { node-version-file: .nvmrc, cache: npm }
       - run: npm ci
       - name: Generate test-only application secrets
         run: |
@@ -63,6 +63,7 @@ jobs:
       - run: npm run verify:closeout-docx
       - run: npm run verify:full-backup
       - run: npm run verify:teaching-import
+      - run: npm run verify:mentor-module
       - run: npm run verify:backup-safety
       - run: npm run verify:passcode-script
       - run: npm run verify:server-actions-auth
@@ -97,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 24, cache: npm }
+        with: { node-version-file: .nvmrc, cache: npm }
       - run: npm ci
       - run: npm run db:generate
       - run: npx playwright install --with-deps chromium

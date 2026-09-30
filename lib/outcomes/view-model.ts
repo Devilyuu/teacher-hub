@@ -13,6 +13,10 @@ import {
   type OutcomeFilters,
 } from "@/lib/outcomes/filters";
 import {
+  entryInGroup,
+  type PerformanceEntryGroup,
+} from "@/lib/outcomes/grouping";
+import {
   outcomeProjectHref,
   safeOutcomeReturnPath,
 } from "@/lib/outcomes/links";
@@ -22,6 +26,12 @@ type OutcomeRowViewOptions = {
   scope: LedgerScope;
   currentOutcomePath: string;
   filters: Pick<OutcomeFilters, "year" | "major" | "minor" | "unverifiedOnly">;
+  /**
+   * 列表分组时，这一行落在哪一组。给了就只留属于这一组的绩效事项——
+   * 跨两个大类的课题在两组里各出现一次，每处只印自己那一份分
+   * （lib/outcomes/grouping.ts）。右侧面板不传：面板看的是整条记录
+   */
+  entryGroup?: PerformanceEntryGroup | null;
 };
 
 export type OutcomeRowViewModel = {
@@ -39,10 +49,12 @@ function visiblePerformanceEntries(
   row: UnifiedOutcomeRow,
   options: OutcomeRowViewOptions,
 ): PerformanceEntry[] {
-  return matchingPerformanceEntries(row, {
+  const entries = matchingPerformanceEntries(row, {
     scope: options.scope,
     ...options.filters,
   });
+  const group = options.entryGroup;
+  return group ? entries.filter((entry) => entryInGroup(entry, group)) : entries;
 }
 
 function performanceSummary(entries: PerformanceEntry[]): string {
@@ -96,6 +108,15 @@ export function outcomeRowViewModel(
       level: row.level,
       perfCategoryId: row.perfCategoryId,
       promotionCategoryId: row.promotionCategoryId,
+      // 已挂那一项不在当前那版表里时，行内下拉照写这个名字并保持不动（PromotionSelect / PerfSelect）
+      promotionLabel: row.promotionCategory
+        ? `${row.promotionCategory.code} ${row.promotionCategory.minorIndicator}` +
+          (row.promotionYear == null ? "" : `（${row.promotionYear} 版）`)
+        : null,
+      perfLabel: (() => {
+        const category = row.performanceEntries.find((entry) => entry.perfCategory)?.perfCategory;
+        return category ? `${category.majorCategory} / ${category.minorCategory}` : null;
+      })(),
       promotionScore: row.promotionScore,
       declaredScore: row.declaredScore,
       usableFor: row.usableFor,

@@ -302,6 +302,62 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     reason: "合作指导教师连接。显式建模就是为了能进这份清单",
   },
 
+  // ── 学业导师（mentor，与上面的班主任 advisor 是两套表）──
+  {
+    model: "MenteeBatch",
+    delegate: "menteeBatch",
+    include: true,
+    reason: "带教批次。导师名单与指导记录都挂在它下面",
+  },
+  {
+    model: "Mentee",
+    delegate: "mentee",
+    include: true,
+    reason: "导师名下的学生。姓名是文本，在册学生关联可空",
+  },
+  {
+    model: "MenteeRecordType",
+    delegate: "menteeRecordType",
+    include: true,
+    reason: "指导记录类型字典",
+  },
+  {
+    model: "MenteeRecord",
+    delegate: "menteeRecord",
+    include: true,
+    reason: "指导记录流水。学期末那张导师工作记录表全靠它",
+  },
+  {
+    model: "MenteeRecordMember",
+    delegate: "menteeRecordMember",
+    include: true,
+    reason: "指导记录 ↔ 学生连接。显式建模就是为了能进这份清单",
+  },
+  {
+    model: "MenteeProjectKind",
+    delegate: "menteeProjectKind",
+    include: true,
+    reason: "学生项目类型字典（毕业设计/大创/课程作品）",
+  },
+  {
+    model: "MenteeProject",
+    delegate: "menteeProject",
+    include: true,
+    reason: "学生项目：毕设、大创、作品。案例索引导出的原料",
+  },
+  {
+    model: "MenteeProjectMember",
+    delegate: "menteeProjectMember",
+    include: true,
+    reason: "项目 ↔ 学生连接。显式建模就是为了能进这份清单",
+  },
+  {
+    model: "MenteeProjectMilestone",
+    delegate: "menteeProjectMilestone",
+    include: true,
+    reason: "项目关键节点（开题/中期/答辩）。是记录不是关卡",
+  },
+
   {
     model: "CaptureItem",
     delegate: "captureItem",

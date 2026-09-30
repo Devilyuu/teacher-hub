@@ -28,6 +28,9 @@ export type QuickEditDefaults = {
   level: Level;
   perfCategoryId: string | null;
   promotionCategoryId: string | null;
+  /** 已挂那一项的名字：它不在当前那版表里时，下拉照写它并保持不动（PromotionSelect / PerfSelect） */
+  perfLabel: string | null;
+  promotionLabel: string | null;
   promotionScore: number | null;
   /** 申报分（绩效口径）。与 promotionScore 是两套口径的分，不互相赋值 */
   declaredScore: number | null;
@@ -185,6 +188,7 @@ export function QuickEditRow({
           name="perfCategoryId"
           options={perfOptions}
           defaultValue={defaults.perfCategoryId}
+          currentLabel={defaults.perfLabel}
           className={`${selectClass} max-w-[16rem]`}
         />
       ) : (
@@ -200,6 +204,7 @@ export function QuickEditRow({
             name="promotionCategoryId"
             options={promotionOptions}
             defaultValue={defaults.promotionCategoryId}
+            currentLabel={defaults.promotionLabel}
             className={`${selectClass} max-w-[16rem]`}
           />
           <label className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -293,7 +298,7 @@ export function QuickEditRow({
         <p className="basis-full text-xs leading-relaxed text-muted-foreground">
           {perfRuleText}
           {selectedPerf?.remark ? (
-            <span className="ml-2 opacity-80">备注：{selectedPerf.remark}</span>
+            <span className="ml-2">备注：{selectedPerf.remark}</span>
           ) : null}
         </p>
       ) : null}

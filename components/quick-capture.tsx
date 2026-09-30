@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createCapture } from "@/lib/actions/capture-actions";
 import { CAPTURE_KIND_LABELS, type CaptureKind } from "@/lib/capture";
 import { IDLE_FORM_STATE, type FormState } from "@/lib/form-state";
+import { shortcutFor } from "@/lib/shortcuts";
 
 const KINDS = Object.keys(CAPTURE_KIND_LABELS) as CaptureKind[];
 
@@ -86,6 +87,18 @@ export function QuickCapture() {
     setOpen(false);
   }
 
+  // Ctrl/⌘+K 从任何地方打开（口径在 lib/shortcuts.ts）。已经开着再按是空操作，
+  // 写了一半的草稿不受影响。全站只挂一个 QuickCapture（顶栏），不会一按弹出两个
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (shortcutFor(event) !== "capture") return;
+      event.preventDefault();
+      setOpen(true);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <Dialog
       open={open}
@@ -110,8 +123,9 @@ export function QuickCapture() {
             type="button"
             variant="ghost"
             size="icon"
-            title="快速记录"
+            title="快速记录（Ctrl+K / ⌘K）"
             aria-label="快速记录"
+            aria-keyshortcuts="Control+K Meta+K"
             className="text-muted-foreground"
           />
         }

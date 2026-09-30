@@ -155,6 +155,9 @@ describe("outcomeRowViewModel", () => {
       level: "PROVINCIAL",
       perfCategoryId: "perf-paper",
       promotionCategoryId: "promotion-paper",
+      // 已挂那一项的名字：它不在当前那版表里时，行内下拉照写它并保持不动，不会一保存就被清空
+      promotionLabel: "5.1 论文（2025 版）",
+      perfLabel: "科研与社会服务工作 / 论文",
       promotionScore: 4,
       declaredScore: 10,
       usableFor: ["PERFORMANCE"],
@@ -213,6 +216,57 @@ describe("outcomeRowViewModel", () => {
         (entry) => entry.id,
       ),
     ).toEqual(["categorized-unverified"]);
+  });
+
+  it("narrows entries to the group the row is rendered under", () => {
+    // 一个课题在两个大类下各有一条事项，列表分组后它在两组里各出现一次；
+    // 每一处只该印属于那一组的事项和分，否则同一个分被两组各数一遍
+    const crossCategory = projectRow({
+      performanceEntries: [
+        {
+          id: "research",
+          year: 2026,
+          isVerified: true,
+          declaredScore: 15,
+          perfCategory: {
+            majorCategory: "科研与社会服务工作",
+            minorCategory: "纵向课题",
+          },
+        },
+        {
+          id: "teaching",
+          year: 2026,
+          isVerified: true,
+          declaredScore: 2,
+          perfCategory: {
+            majorCategory: "教学",
+            minorCategory: "教学项目申报及获奖",
+          },
+        },
+      ],
+    });
+    const options = {
+      scope: "performance" as const,
+      currentOutcomePath: "/achievements?scope=performance",
+      filters: {},
+    };
+
+    expect(
+      outcomeRowViewModel(crossCategory, options).performanceEntries.map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(["research", "teaching"]);
+    expect(
+      outcomeRowViewModel(crossCategory, {
+        ...options,
+        entryGroup: { dimension: "major", value: "教学" },
+      }).performanceEntries.map((entry) => entry.id),
+    ).toEqual(["teaching"]);
+    // 面板不传 entryGroup：它看的是整条记录，两条都该在
+    expect(
+      outcomeRowViewModel(crossCategory, { ...options, entryGroup: null })
+        .performanceEntries,
+    ).toHaveLength(2);
   });
 });
 

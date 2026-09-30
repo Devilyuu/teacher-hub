@@ -35,6 +35,12 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // 静态资源与 favicon 不走鉴权
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // 静态资源与 favicon 不走鉴权。
+  //
+  // 后缀排除**只放根目录下的单段路径**（`/icon.png`、`/apple-icon.png`）：
+  // 原来写的是 `.*\.(svg|png|…)$`，任意深度都匹配，于是 `/api/attachments/<id>.png`、
+  // `/projects/<id>.png` 整段跳过鉴权（2026-09-15 审核发现）。
+  // 本项目没有 public/ 目录，静态文件只有 Next 生成的根级图标。
+  // lib/proxy-matcher.test.ts 锁着这条正则的行为
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

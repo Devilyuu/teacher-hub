@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   buildMonthGrid,
   formatMonthParam,
+  monthAgenda,
   monthRange,
   parseMonthParam,
   shiftMonth,
@@ -37,6 +38,9 @@ const KIND_STYLE: Record<CalendarEvent["kind"], string> = {
   // 报名截止和结题截止同属「错过就没了」，共用琥珀档；
   // 这是唯一被允许借健康度语义色的一类——它表达的正是紧迫，不是分类
   competition: "bg-[var(--h-amber-bg)] text-[var(--h-amber-fg)]",
+  // 节点走中性档**不借琥珀**：开题、中期、答辩是排好的日程，不是
+  // 「错过就没了」的截止日。借了语义色会稀释琥珀＝紧迫这个意思
+  menteeMilestone: "bg-muted text-muted-foreground",
 };
 
 export default async function CalendarPage({
@@ -54,7 +58,15 @@ export default async function CalendarPage({
 
   const modules = await getEnabledModules();
 
-  const [meetings, duties, projects, tasks, semesters, competitionEntries] = await Promise.all([
+  const [
+    meetings,
+    duties,
+    projects,
+    tasks,
+    semesters,
+    competitionEntries,
+    menteeMilestones,
+  ] = await Promise.all([
     prisma.meeting.findMany({
       where: { meetingTime: wide },
       select: { id: true, title: true, meetingTime: true },
@@ -114,6 +126,29 @@ export default async function CalendarPage({
             registerDeadline: true,
             competeAt: true,
             competition: { select: { name: true } },
+          },
+        })
+      : Promise.resolve([]),
+    // 导师模块关了，月历上也不该出现它的节点——同轮派、参赛那条裂缝。
+    // **只查填了精确日期的**：date 为 null 的（「五月底答辩」）进不来
+    modules.mentor
+      ? prisma.menteeProjectMilestone.findMany({
+          where: { date: wide },
+          select: {
+            id: true,
+            label: true,
+            date: true,
+            project: {
+              select: {
+                id: true,
+                title: true,
+                members: {
+                  orderBy: { orderIndex: "asc" },
+                  take: 1,
+                  select: { mentee: { select: { name: true } } },
+                },
+              },
+            },
           },
         })
       : Promise.resolve([]),
@@ -217,6 +252,21 @@ export default async function CalendarPage({
     }
   }
 
+  // 节点标题是「答辩·林知远」而不是项目全名：月历格子窄，
+  // 而要认出是哪一条，人名比题目管用
+  for (const milestone of menteeMilestones) {
+    if (!milestone.date) continue;
+    const who = milestone.project.members[0]?.mentee.name;
+    events.push({
+      id: `mm-${milestone.id}`,
+      kind: "menteeMilestone",
+      title: who ? `${milestone.label}·${who}` : `${milestone.label}·${milestone.project.title}`,
+      date: formatDateOnly(milestone.date),
+      href: `/mentees/projects/${milestone.project.id}`,
+      note: milestone.project.title,
+    });
+  }
+
   for (const task of tasks) {
     if (!task.dueDate) continue;
     events.push({
@@ -229,6 +279,29 @@ export default async function CalendarPage({
   }
 
   const cells = buildMonthGrid(year, month, events);
+  const agenda = monthAgenda(cells);
+
+  // 说明和图例按模块开关拼：关掉的模块月历上没有它的条目，文字里也不该有。
+  // 原来写死成「轮派 / 任务」「课题截止日」，加了参赛和导师节点之后图例就对不上了
+  const legend = {
+    sources: [
+      "上课",
+      "会议",
+      modules.duties ? "轮派" : null,
+      "课题截止日",
+      modules.competitions ? "参赛" : null,
+      modules.mentor ? "学生项目节点" : null,
+      "任务到期",
+    ].filter((item): item is string => item != null),
+    neutral: [
+      modules.duties ? "轮派" : null,
+      "任务",
+      modules.mentor ? "学生项目节点" : null,
+    ].filter((item): item is string => item != null),
+    amber: ["课题截止日", modules.competitions ? "参赛" : null].filter(
+      (item): item is string => item != null,
+    ),
+  };
   const [prevYear, prevMonth] = shiftMonth(year, month, -1);
   const [nextYear, nextMonth] = shiftMonth(year, month, 1);
 
@@ -240,7 +313,7 @@ export default async function CalendarPage({
         <div className="space-y-2">
           <h1 className="page-title">日历</h1>
           <p className="measure text-muted-foreground">
-            上课、会议、轮派、课题截止日、任务到期，铺在同一张月历上。
+            {legend.sources.join("、")}，铺在同一张月历上。
           </p>
         </div>
 
@@ -267,8 +340,11 @@ export default async function CalendarPage({
         </div>
       </header>
 
-      <div className="surface overflow-x-auto p-3">
-        <div className="grid min-w-[52rem] grid-cols-7 gap-1">
+      {/* 两份都渲染、用 CSS 切（服务端拿不到视口）：md 起是七列网格，手机上是按天列表。
+          网格最小宽度从 52rem 放到 38rem——768px 平板减掉 66px 图标栏和边距后正好放得下，
+          原来在平板上也要横滑 */}
+      <div className="surface overflow-x-auto p-3 max-md:hidden">
+        <div className="grid min-w-[38rem] grid-cols-7 gap-1">
           {WEEKDAYS.map((day) => (
             <div key={day} className="pb-1 text-center text-xs text-muted-foreground">
               {day}
@@ -319,6 +395,61 @@ export default async function CalendarPage({
         </div>
       </div>
 
+      {/* 手机：七列网格要横滑两屏多，横滑时周几那一行早就滑出去了。
+          换成按天列表，只列有安排的日子；点进去走原来的详情页，不另做一套 */}
+      <div className="md:hidden">
+        {agenda.length === 0 ? (
+          <p className="rounded-3xl bg-well p-8 text-center text-sm text-muted-foreground">
+            {year} 年 {month} 月没有安排。
+          </p>
+        ) : (
+          <ol className="surface divide-y divide-border/50 overflow-hidden">
+            {agenda.map((day) => (
+              <li
+                key={day.date}
+                className={cn("flex gap-3 px-3 py-2.5", day.isToday && "bg-well")}
+                aria-current={day.isToday ? "date" : undefined}
+              >
+                <div className="w-11 shrink-0 pt-1.5 text-center">
+                  <div className="text-lg leading-none font-semibold tabular-nums">{day.day}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {day.isToday ? "今天" : day.weekday}
+                  </div>
+                </div>
+                {day.events.length === 0 ? (
+                  <p className="flex min-h-11 flex-1 items-center text-sm text-muted-foreground">
+                    今天没有安排
+                  </p>
+                ) : (
+                  <ul className="min-w-0 flex-1 space-y-1">
+                    {day.events.map((item) => (
+                      <li key={item.id}>
+                        <Link
+                          href={item.href}
+                          className={cn(
+                            "flex min-h-11 flex-col justify-center rounded-lg px-2.5 py-1.5 text-sm",
+                            KIND_STYLE[item.kind],
+                          )}
+                        >
+                          <span className="line-clamp-2">
+                            {item.time ? (
+                              <span className="mr-1.5 tabular-nums">{item.time}</span>
+                            ) : null}
+                            {item.title}
+                          </span>
+                          {/* 网格里补充信息藏在 title 里，手指点不出悬停提示，列表里直接写出来 */}
+                          {item.note ? <span className="truncate text-xs">{item.note}</span> : null}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
       <div className="flex flex-wrap gap-4 px-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="size-2.5 rounded-sm bg-foreground/10" /> 会议
@@ -327,10 +458,10 @@ export default async function CalendarPage({
           <span className="size-2.5 rounded-sm bg-foreground/5" /> 上课
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-sm bg-muted" /> 轮派 / 任务
+          <span className="size-2.5 rounded-sm bg-muted" /> {legend.neutral.join(" / ")}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-sm bg-[var(--h-amber-bg)]" /> 课题截止日
+          <span className="size-2.5 rounded-sm bg-[var(--h-amber-bg)]" /> {legend.amber.join(" / ")}
         </span>
       </div>
     </div>

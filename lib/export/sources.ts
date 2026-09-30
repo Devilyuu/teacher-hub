@@ -8,6 +8,13 @@ import {
   LEVEL_LABELS,
 } from "@/lib/labels";
 import { PROJECT_PERFORMANCE_EVENT_LABELS } from "@/lib/project-performance";
+import type { PromotionCapRule } from "@/lib/promotion";
+import {
+  declarationSourceKey,
+  isDeclarationMaterial,
+  type DeclarationMaterial,
+} from "./declaration-materials";
+import { loadPromotionCapRules } from "@/lib/queries/promotion-categories";
 import type { DeclarationExportInputItem, DeclarationExportProfile } from "./fingerprint";
 
 const achievementExportSelect = {
@@ -189,6 +196,13 @@ function adaptProjectEvents(
 export type DeclarationExportSources = {
   items: DeclarationExportInputItem[];
   profile: DeclarationExportProfile;
+  /** 当前那版职称量化表的封顶规则，职称包算封顶后合计用 */
+  capRules: PromotionCapRule[];
+  /**
+   * 每个申报候选（`declarationSourceKey`）能附上的支撑材料，申报包 ZIP 用。
+   * 条数就是该候选的 `attachmentCount`——两者出自同一份筛过的列表
+   */
+  materials: ReadonlyMap<string, readonly DeclarationMaterial[]>;
 };
 
 /**
@@ -259,11 +273,22 @@ export async function loadDeclarationExportSources(
         { projectId: { in: projects.map((project) => project.id) } },
       ],
     },
-    select: { achievementId: true, projectId: true },
+    orderBy: [{ uploadedAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      achievementId: true,
+      projectId: true,
+      kind: true,
+      filename: true,
+      storagePath: true,
+      size: true,
+      uploadedAt: true,
+    },
   });
   const profile = await db.profile.findFirst({
-    select: { name: true, unit: true },
+    select: { name: true, unit: true, currentTitleSince: true },
   });
+  const capRules = await loadPromotionCapRules(db);
   const rewardedAchievementIds = new Set(
     rewardDecisions.flatMap((decision) =>
       decision.achievementId == null ? [] : [decision.achievementId],
@@ -286,20 +311,50 @@ export async function loadDeclarationExportSources(
   const promotionCategoryById = new Map(
     promotionCategories.map(({ id, ...category }) => [id, category]),
   );
-  const achievementAttachmentCounts = new Map<string, number>();
-  const projectAttachmentCounts = new Map<string, number>();
+  // 「材料份数」和申报包 ZIP 里的文件必须是同一批：两边都只数能拿去申报的材料
+  // （研究参考不算，isDeclarationMaterial），表上写 2 份、包里就是 2 份
+  const achievementMaterials = new Map<string, DeclarationMaterial[]>();
+  const projectMaterials = new Map<string, DeclarationMaterial[]>();
   for (const attachment of attachments) {
-    if (attachment.achievementId != null) {
-      achievementAttachmentCounts.set(
-        attachment.achievementId,
-        (achievementAttachmentCounts.get(attachment.achievementId) ?? 0) + 1,
-      );
-    }
-    if (attachment.projectId != null) {
-      projectAttachmentCounts.set(
-        attachment.projectId,
-        (projectAttachmentCounts.get(attachment.projectId) ?? 0) + 1,
-      );
+    if (!isDeclarationMaterial(attachment.kind)) continue;
+    const material: DeclarationMaterial = {
+      id: attachment.id,
+      kind: attachment.kind,
+      filename: attachment.filename,
+      storagePath: attachment.storagePath,
+      size: attachment.size,
+      uploadedAt: attachment.uploadedAt,
+    };
+    const owner =
+      attachment.achievementId != null
+        ? { map: achievementMaterials, id: attachment.achievementId }
+        : attachment.projectId != null
+          ? { map: projectMaterials, id: attachment.projectId }
+          : null;
+    if (owner == null) continue;
+    const rows = owner.map.get(owner.id) ?? [];
+    rows.push(material);
+    owner.map.set(owner.id, rows);
+  }
+  const achievementAttachmentCounts = new Map(
+    [...achievementMaterials].map(([id, rows]) => [id, rows.length]),
+  );
+  const projectAttachmentCounts = new Map(
+    [...projectMaterials].map(([id, rows]) => [id, rows.length]),
+  );
+
+  // 每个申报候选对应哪几份材料。课题绩效事项没有自己的附件，收它所属课题的
+  const materials = new Map<string, DeclarationMaterial[]>();
+  for (const achievement of achievements) {
+    const rows = achievementMaterials.get(achievement.id);
+    if (rows) materials.set(declarationSourceKey("ACHIEVEMENT", achievement.id), rows);
+  }
+  for (const project of projects) {
+    const rows = projectMaterials.get(project.id);
+    if (!rows) continue;
+    materials.set(declarationSourceKey("PROJECT", project.id), rows);
+    for (const event of eventsByProject.get(project.id) ?? []) {
+      materials.set(declarationSourceKey("PROJECT_EVENT", event.id), rows);
     }
   }
 
@@ -341,6 +396,9 @@ export async function loadDeclarationExportSources(
     profile: {
       name: profile?.name ?? "",
       unit: profile?.unit ?? "",
+      currentTitleSince: profile?.currentTitleSince ?? null,
     },
+    capRules,
+    materials,
   };
 }

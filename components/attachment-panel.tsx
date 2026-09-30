@@ -10,12 +10,13 @@ import { Label } from "@/components/ui/label";
 import { formatFileSize, formatTimestampDate } from "@/lib/format";
 import { IDLE_FORM_STATE, formMessageClass } from "@/lib/form-state";
 import { ATTACHMENT_KIND_LABELS } from "@/lib/labels";
-import { ATTACHMENT_KIND_OPTIONS } from "@/lib/options";
+import { ATTACHMENT_KIND_PROFILES, attachmentKindOptions, type AttachmentUploadOwner } from "@/lib/attachment-kinds";
 import { groupMaterialsByKind, type RequirementSummary } from "@/lib/materials";
 import {
   deleteAttachment,
   uploadAchievementAttachment,
   uploadCompetitionAttachment,
+  uploadMenteeProjectAttachment,
   uploadProjectAttachment,
 } from "@/lib/actions/attachment-actions";
 import type { AttachmentKind } from "@/lib/generated/prisma/enums";
@@ -34,9 +35,10 @@ export type AttachmentItem = {
   previewable: boolean;
 };
 
-/** 附件挂在课题、成果还是参赛记录上。三边的上传动作签名一样，只是归属不同 */
+/** 附件挂在课题、成果、参赛记录还是学生项目上。
+ *  四边的上传动作签名一样，只是归属不同 */
 export type AttachmentOwner = {
-  kind: "project" | "achievement" | "competitionEntry";
+  kind: AttachmentUploadOwner;
   id: string;
 };
 
@@ -46,17 +48,19 @@ const OWNER_UPLOAD = {
   project: uploadProjectAttachment,
   achievement: uploadAchievementAttachment,
   competitionEntry: uploadCompetitionAttachment,
+  menteeProject: uploadMenteeProjectAttachment,
 } as const;
 
 const OWNER_SEGMENT = {
   project: "projects",
   achievement: "achievements",
   competitionEntry: "competitions",
+  menteeProject: "mentees/projects",
 } as const;
 
 /**
- * 字段级报错。整体提示写的是「看下标红的地方」，
- * 那就必须真有地方标红——否则用户只看到一句红字，无从下手。
+ * 字段级报错。整体提示只报第一条原因（`toFormState`），
+ * 同时有好几处不对时得在字段下面逐条标出来，否则用户只能一条条试。
  */
 function FieldErrors({ errors }: { errors?: string[] }) {
   if (!errors?.length) return null;
@@ -100,6 +104,9 @@ export function AttachmentPanel({
 }) {
   const action = OWNER_UPLOAD[owner.kind].bind(null, owner.id);
   const ownerPath = `/${OWNER_SEGMENT[owner.kind]}/${owner.id}`;
+  // 下拉选项、默认值、空状态按归属取（lib/attachment-kinds.ts，服务端复核用同一份）
+  const kindProfile = ATTACHMENT_KIND_PROFILES[owner.kind];
+  const kindOptions = attachmentKindOptions(owner.kind);
   const [state, formAction] = useActionState(action, IDLE_FORM_STATE);
   const [preview, setPreview] = useState<AttachmentItem | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -152,11 +159,11 @@ export function AttachmentPanel({
             <select
               id="kind"
               name="kind"
-              defaultValue="PROPOSAL"
+              defaultValue={kindProfile.defaultKind}
               aria-invalid={state.fieldErrors?.kind ? true : undefined}
               className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive"
             >
-              {ATTACHMENT_KIND_OPTIONS.map((option) => (
+              {kindOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -186,7 +193,7 @@ export function AttachmentPanel({
         <div className="flex flex-col items-center gap-3 rounded-3xl bg-well p-10 text-center">
           <FolderArt className="size-12 text-muted-foreground/60" />
           <p className="text-sm text-muted-foreground">
-            还没有上传任何材料。申报书、立项通知、结题报告都可以放这里，按类型归好档。
+            还没有上传任何材料。{kindProfile.emptyHint}
           </p>
         </div>
       ) : (

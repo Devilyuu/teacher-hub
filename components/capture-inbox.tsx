@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
+  BookUser,
   Clock,
   Inbox,
   ListTodo,
@@ -15,9 +16,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { DecorTile } from "@/components/decor-tile";
+import { formatDateOnly, todayAsDateOnly } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import {
   convertCapture,
+  convertCaptureToMenteeRecord,
   convertCaptureToStudentRecord,
   dismissCapture,
   restoreCapture,
@@ -47,6 +50,79 @@ export type InboxAdvisorContext = {
   types: Array<{ id: string; name: string }>;
 };
 
+/**
+ * 学业导师模块开着才有：速记可以归到某个导师学生名下（指导记录）。
+ *
+ * **和上面那个是两份**：advisor = 班主任（班级 + 在册学生），
+ * mentor = 学业导师（批次 + 名单）。两个模块可以同时开着，
+ * 那时收件箱里会并排出现两个去向按钮——所以文案和图标都不能重。
+ */
+export type InboxMentorContext = {
+  batchId: string;
+  mentees: Array<{ id: string; name: string }>;
+  types: Array<{ id: string; name: string }>;
+};
+
+/** 归类面板：选类型 + 选人（可不选）+ 确认。两个模块共用这一个形状 */
+function AssignPanel({
+  types,
+  members,
+  allLabel,
+  memberLabel,
+  pending,
+  onSubmit,
+}: {
+  types: Array<{ id: string; name: string }>;
+  members: Array<{ id: string; name: string }>;
+  /** 不点名时的选项文案，「全班（不点名）」/「全批（不点名）」 */
+  allLabel: string;
+  memberLabel: string;
+  pending: boolean;
+  onSubmit: (typeId: string, memberId: string) => void;
+}) {
+  // 面板是条件渲染的，每次打开都会重新挂载，所以初值取第一个类型就够了
+  const [typeId, setTypeId] = useState(types[0]?.id ?? "");
+  const [memberId, setMemberId] = useState("");
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label="记录类型"
+        className="h-8 rounded-lg border border-input bg-transparent px-2 text-xs outline-none"
+        value={typeId}
+        onChange={(event) => setTypeId(event.target.value)}
+      >
+        {types.map((type) => (
+          <option key={type.id} value={type.id}>
+            {type.name}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={memberLabel}
+        className="h-8 rounded-lg border border-input bg-transparent px-2 text-xs outline-none"
+        value={memberId}
+        onChange={(event) => setMemberId(event.target.value)}
+      >
+        <option value="">{allLabel}</option>
+        {members.map((member) => (
+          <option key={member.id} value={member.id}>
+            {member.name}
+          </option>
+        ))}
+      </select>
+      <Button
+        type="button"
+        size="sm"
+        disabled={pending || typeId === ""}
+        onClick={() => onSubmit(typeId, memberId)}
+      >
+        确认
+      </Button>
+    </div>
+  );
+}
+
 function KindBadge({ kind }: { kind: CaptureKind }) {
   const Icon = KIND_ICONS[kind];
   return (
@@ -59,12 +135,15 @@ function KindBadge({ kind }: { kind: CaptureKind }) {
 
 /** 延期选项。「明天 / 下周」覆盖绝大多数情况，不做日期选择器——那又是一次点击 */
 function snoozeDates(): Array<{ label: string; value: string }> {
-  const day = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  // 走 lib/date.ts 的纯日期口径。原来是 `toISOString().slice(0, 10)`——
+  // 那取的是 UTC 日期，东八区 00:00–08:00 之间「明天」会算成今天，
+  // 速记延期到当天、不报错（2026-09-15 审核发现）
+  const today = todayAsDateOnly();
+  const plusDays = (days: number) =>
+    formatDateOnly(new Date(today.getTime() + days * 86_400_000));
   return [
-    { label: "明天", value: iso(now + day) },
-    { label: "下周", value: iso(now + 7 * day) },
+    { label: "明天", value: plusDays(1) },
+    { label: "下周", value: plusDays(7) },
   ];
 }
 
@@ -79,15 +158,17 @@ const KIND_ICONS: Record<CaptureKind, LucideIcon> = {
 function CaptureRow({
   item,
   advisor,
+  mentor,
 }: {
   item: InboxCapture;
   advisor: InboxAdvisorContext | null;
+  mentor: InboxMentorContext | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [assigning, setAssigning] = useState(false);
-  const [typeId, setTypeId] = useState(advisor?.types[0]?.id ?? "");
-  const [studentId, setStudentId] = useState("");
+  // 一次只开一个归类面板：两个模块都开着时，两个面板同屏会分不清
+  // 上面那排选择框是在往哪张表里归
+  const [assigning, setAssigning] = useState<"advisor" | "mentor" | null>(null);
   const dates = snoozeDates();
 
   function run(fn: () => Promise<unknown>) {
@@ -156,10 +237,30 @@ function CaptureRow({
             variant="ghost"
             className="text-muted-foreground"
             disabled={pending}
-            onClick={() => setAssigning((open) => !open)}
+            onClick={() =>
+              setAssigning((open) => (open === "advisor" ? null : "advisor"))
+            }
           >
             <UsersRound className="size-3.5" aria-hidden />
             归到学生
+          </Button>
+        ) : null}
+
+        {/* 两个模块都开着时这两个按钮并排出现，所以**文案和图标都不能重**：
+            「归到学生」是班主任的班，「归到导师学生」是双选带的那一批 */}
+        {mentor ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            disabled={pending}
+            onClick={() =>
+              setAssigning((open) => (open === "mentor" ? null : "mentor"))
+            }
+          >
+            <BookUser className="size-3.5" aria-hidden />
+            归到导师学生
           </Button>
         ) : null}
 
@@ -187,50 +288,42 @@ function CaptureRow({
         </Button>
       </div>
 
-      {advisor && assigning ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="记录类型"
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-xs outline-none"
-            value={typeId}
-            onChange={(event) => setTypeId(event.target.value)}
-          >
-            {advisor.types.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="学生"
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-xs outline-none"
-            value={studentId}
-            onChange={(event) => setStudentId(event.target.value)}
-          >
-            <option value="">全班（不点名）</option>
-            {advisor.students.map((student) => (
-              <option key={student.id} value={student.id}>
-                {student.name}
-              </option>
-            ))}
-          </select>
-          <Button
-            type="button"
-            size="sm"
-            disabled={pending || typeId === ""}
-            onClick={() =>
-              run(() => {
-                const data = new FormData();
-                data.set("classGroupId", advisor.classGroupId);
-                data.set("typeId", typeId);
-                data.set("studentId", studentId);
-                return convertCaptureToStudentRecord(item.id, data);
-              })
-            }
-          >
-            确认
-          </Button>
-        </div>
+      {advisor && assigning === "advisor" ? (
+        <AssignPanel
+          types={advisor.types}
+          members={advisor.students}
+          allLabel="全班（不点名）"
+          memberLabel="学生"
+          pending={pending}
+          onSubmit={(typeId, studentId) =>
+            run(() => {
+              const data = new FormData();
+              data.set("classGroupId", advisor.classGroupId);
+              data.set("typeId", typeId);
+              data.set("studentId", studentId);
+              return convertCaptureToStudentRecord(item.id, data);
+            })
+          }
+        />
+      ) : null}
+
+      {mentor && assigning === "mentor" ? (
+        <AssignPanel
+          types={mentor.types}
+          members={mentor.mentees}
+          allLabel="全批（不点名）"
+          memberLabel="导师学生"
+          pending={pending}
+          onSubmit={(typeId, menteeId) =>
+            run(() => {
+              const data = new FormData();
+              data.set("batchId", mentor.batchId);
+              data.set("typeId", typeId);
+              data.set("menteeId", menteeId);
+              return convertCaptureToMenteeRecord(item.id, data);
+            })
+          }
+        />
       ) : null}
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
@@ -252,12 +345,15 @@ export function CaptureInbox({
   items,
   overflow,
   advisor = null,
+  mentor = null,
 }: {
   items: InboxCapture[];
   /** 超出首页上限、没显示出来的条数 */
   overflow: number;
   /** 班主任模块开着才传，多一个「归到学生」去向 */
   advisor?: InboxAdvisorContext | null;
+  /** 学业导师模块开着才传，多一个「归到导师学生」去向 */
+  mentor?: InboxMentorContext | null;
 }) {
   if (items.length === 0) return null;
 
@@ -276,7 +372,7 @@ export function CaptureInbox({
           和左栏那些已经归了类的任务卡在明度上隔开一层 */}
       <ul className="space-y-2 rounded-3xl bg-well p-2">
         {items.map((item) => (
-          <CaptureRow key={item.id} item={item} advisor={advisor} />
+          <CaptureRow key={item.id} item={item} advisor={advisor} mentor={mentor} />
         ))}
       </ul>
 

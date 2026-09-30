@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { ArrowRight, Trash2 } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +35,36 @@ function SubmitButton({ label, small }: { label: string; small?: boolean }) {
 }
 
 /**
+ * 议题池里「拉进来」的那颗胶囊。和下面「转成任务」一样要有提交中状态：
+ * 点了没反应的按钮会被再点一次（2026-09-14 审核报告）。服务端各有兜底
+ * （只拉 PENDING 的议题、转任务带快照校验），这里补的是反馈
+ */
+function PullPoolItemButton({ content }: { content: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-busy={pending}
+      className="inline-flex items-center gap-1 rounded-full bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-wait"
+      style={{ boxShadow: "var(--shadow-pill)" }}
+    >
+      {content}
+      <ArrowRight className="size-3" aria-hidden />
+    </button>
+  );
+}
+
+function ConvertToTaskButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" variant="outline" size="sm" disabled={pending}>
+      {pending ? "转换中…" : "转成任务"}
+    </Button>
+  );
+}
+
+/**
  * 会议详情：**三阶段闭环**（prd-routines 3）。
  *
  *   会前  议题池 → 议程
@@ -49,6 +80,7 @@ export function MeetingDetail({
   resolutions,
   pool,
   transcriptionEnabled,
+  cloudTranscription,
   asrConfigured,
   minutesConfigured,
   recordings,
@@ -59,6 +91,7 @@ export function MeetingDetail({
   resolutions: Resolution[];
   pool: PoolItem[];
   transcriptionEnabled: boolean;
+  cloudTranscription: boolean;
   asrConfigured: boolean;
   minutesConfigured: boolean;
   recordings: RecordingPanelItem[];
@@ -77,6 +110,7 @@ export function MeetingDetail({
       <RecordingPanel
         meetingId={meetingId}
         transcriptionEnabled={transcriptionEnabled}
+        cloudTranscription={cloudTranscription}
         asrConfigured={asrConfigured}
         minutesConfigured={minutesConfigured}
         recordings={recordings}
@@ -96,17 +130,15 @@ export function MeetingDetail({
                   {index + 1}.
                 </span>
                 <span className="min-w-0 flex-1">{entry}</span>
-                <form action={removeAgendaEntry.bind(null, meetingId, index)}>
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    aria-label={`删除议程 ${entry}`}
-                  >
-                    <Trash2 className="size-3" aria-hidden />
-                  </Button>
-                </form>
+                {/* 硬删、找不回来，走确认（CLAUDE.md 删除模型） */}
+                <ConfirmSubmitButton
+                  action={removeAgendaEntry.bind(null, meetingId, index)}
+                  message={`删除议程「${entry}」？删掉就没有了。`}
+                  size="icon-sm"
+                  label={`删除议程 ${entry}`}
+                >
+                  <Trash2 className="size-3" aria-hidden />
+                </ConfirmSubmitButton>
               </li>
             ))}
           </ol>
@@ -124,14 +156,7 @@ export function MeetingDetail({
               {pool.map((item) => (
                 <li key={item.id}>
                   <form action={pullAgendaItem.bind(null, meetingId, item.id)}>
-                    <button
-                      type="submit"
-                      className="inline-flex items-center gap-1 rounded-full bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                      style={{ boxShadow: "var(--shadow-pill)" }}
-                    >
-                      {item.content}
-                      <ArrowRight className="size-3" aria-hidden />
-                    </button>
+                    <PullPoolItemButton content={item.content} />
                   </form>
                 </li>
               ))}
@@ -204,23 +229,18 @@ export function MeetingDetail({
                   </Link>
                 ) : (
                   <form action={convertResolutionToTask.bind(null, meetingId, index, expected)}>
-                    <Button type="submit" variant="outline" size="sm">
-                      转成任务
-                    </Button>
+                    <ConvertToTaskButton />
                   </form>
                 )}
 
-                <form action={removeResolution.bind(null, meetingId, index, expected)}>
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    aria-label={`删除决议 ${resolution.text}`}
-                  >
-                    <Trash2 className="size-3" aria-hidden />
-                  </Button>
-                </form>
+                <ConfirmSubmitButton
+                  action={removeResolution.bind(null, meetingId, index, expected)}
+                  message={`删除决议「${resolution.text}」？删掉就没有了。`}
+                  size="icon-sm"
+                  label={`删除决议 ${resolution.text}`}
+                >
+                  <Trash2 className="size-3" aria-hidden />
+                </ConfirmSubmitButton>
               </li>;
             })}
           </ul>

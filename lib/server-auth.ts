@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 type SessionTokenReader = () => Promise<string | undefined>;
@@ -19,6 +20,21 @@ export async function requireSession(
   if (!(await verifySessionToken(await readToken()))) {
     throw new Error("未登录");
   }
+}
+
+/**
+ * 页面层的会话闸门，挂在 `app/(app)/layout.tsx` 顶部。
+ *
+ * proxy.ts 是第一道门，但它的 matcher 为放行静态资源排除了 `*.png/*.svg` 这类
+ * 后缀——凡是以这些后缀结尾的路径整段不经 proxy。`/projects/<id>.png` 这样的
+ * 请求会真实进到页面代码，今天靠每个页面 `findUnique → notFound()` 兜住，
+ * 少写一处就是一个未登录可读的数据出口。布局里再验一次，页面层就也有门了。
+ */
+export async function redirectToLoginUnlessSession(
+  readToken: SessionTokenReader = readSessionCookie,
+): Promise<void> {
+  if (await verifySessionToken(await readToken())) return;
+  redirect("/login");
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Plus, Trash2 } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -113,18 +114,14 @@ export function CompetitionDict({ rows }: { rows: CompetitionDictRow[] }) {
               {/* 有记录的赛事删不掉（库里外键是 Restrict）。
                   直接不给按钮，比点了没反应强 */}
               {row.entryCount === 0 ? (
-                <form action={deleteCompetition}>
-                  <input type="hidden" name="competitionId" value={row.id} />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-muted-foreground"
-                    aria-label={`删除 ${row.name}`}
-                  >
-                    <Trash2 className="size-3.5" aria-hidden />
-                  </Button>
-                </form>
+                <ConfirmSubmitButton
+                  action={deleteCompetition.bind(null, row.id)}
+                  message={`删除赛事「${row.name}」？字典里删掉就没有了。`}
+                  size="icon-sm"
+                  label={`删除 ${row.name}`}
+                >
+                  <Trash2 className="size-3.5" aria-hidden />
+                </ConfirmSubmitButton>
               ) : null}
             </li>
           ))}

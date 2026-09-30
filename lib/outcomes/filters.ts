@@ -80,7 +80,7 @@ export function normalizeOutcomeFilters(
       ...common,
       scope,
       window: filters.window,
-      // 旧 achievement-filters 纯函数仍用 major/minor 传职称坐标；
+      // 旧版成果页的链接用 major/minor 传职称坐标，收藏夹里可能还有；
       // 成果页 canonical query 只会传 promotionMajor/promotionMinor。
       promotionMajor: filters.promotionMajor ?? filters.major,
       promotionMinor: filters.promotionMinor ?? filters.minor,

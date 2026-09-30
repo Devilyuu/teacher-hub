@@ -12,6 +12,7 @@ import { PerfSelect } from "@/components/perf-select";
 import { PromotionSelect } from "@/components/promotion-select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { RulesNotImported } from "@/components/rules-not-imported";
 import { IDLE_FORM_STATE, type FormState, formMessageClass } from "@/lib/form-state";
 import type { PromotionOption } from "@/lib/promotion";
 import type { PerfOption } from "@/lib/queries/perf-categories";
@@ -56,8 +57,11 @@ export type AchievementFormDefaults = {
   obsidianPath?: string | null;
   externalRef?: string | null;
   promotionCategoryId?: string | null;
+  /** 已挂那一格的名字，它不在当前那版表里时下拉照写它（PromotionSelect 的「保持不动」） */
+  promotionLabel?: string | null;
   promotionScore?: number | null;
   perfCategoryId?: string | null;
+  perfLabel?: string | null;
   declaredScore?: number | null;
   isVerified?: boolean;
   note?: string | null;
@@ -287,19 +291,17 @@ export function AchievementForm({
                     name="promotionCategoryId"
                     options={promotionOptions}
                     defaultValue={defaults?.promotionCategoryId}
+                    currentLabel={defaults?.promotionLabel}
                     className={CATEGORY_SELECT_CLASS}
                   />
                   <p className="text-xs text-muted-foreground">
-                    《业绩量化考核赋分细则》的二级指标。留「不计入职称」就表示这条评职称用不上，
+                    职称量化表的二级指标。留「不计入职称」就表示这条评职称用不上，
                     成果库的职称口径会把它过滤掉
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-muted-foreground">
-                    还没导入职称量化表，跑一次{" "}
-                    <code>npm run import:promotion-rules</code>。
-                  </p>
+                  <RulesNotImported table="promotion" />
                   <input
                     type="hidden"
                     name="promotionCategoryId"
@@ -317,18 +319,16 @@ export function AchievementForm({
                     name="perfCategoryId"
                     options={perfOptions}
                     defaultValue={defaults?.perfCategoryId}
+                    currentLabel={defaults?.perfLabel}
                     className={CATEGORY_SELECT_CLASS}
                   />
                   <p className="text-xs text-muted-foreground">
-                    《超额工作绩效积分对照表》的小类。和左边各管各的，不互推
+                    绩效对照表的小类。和左边各管各的，不互推
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-xs text-muted-foreground">
-                    还没导入绩效对照表，跑一次{" "}
-                    <code>npm run import:perf-rules</code>。
-                  </p>
+                  <RulesNotImported table="perf" />
                   <input
                     type="hidden"
                     name="perfCategoryId"

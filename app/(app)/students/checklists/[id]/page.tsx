@@ -36,7 +36,7 @@ export default async function ChecklistDetailPage({
 
   return (
     <div className="space-y-6">
-      <StudentTabs />
+      <StudentTabs classId={checklist.classGroupId} />
 
       <header className="space-y-2 pt-2">
         <h1 className="page-title">{checklist.title}</h1>
@@ -49,6 +49,7 @@ export default async function ChecklistDetailPage({
 
       <CheckGrid
         checklistId={checklist.id}
+        classGroupId={checklist.classGroupId}
         title={checklist.title}
         students={students}
         initialCheckedIds={students

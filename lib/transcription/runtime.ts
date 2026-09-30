@@ -1,6 +1,7 @@
 import "server-only";
 
 import { statfs } from "node:fs/promises";
+import { isDesktopEdition } from "@/lib/edition";
 import { minutesAdapterFromEnv } from "@/lib/minutes/adapter";
 import { removeRecordingAudio, runMinutesCleanupMaintenance } from "@/lib/minutes/cleanup";
 import {
@@ -65,6 +66,7 @@ export async function uploadRecordingWithRuntime(
   return uploadMeetingRecording(meetingId, file, cloudDisclosureAccepted, {
     ...repository,
     quotaBytes: policy.quotaBytes,
+    cloudTranscription: !isDesktopEdition(),
     async availableBytes() {
       const stats = await statfs(root);
       return stats.bavail * stats.bsize;

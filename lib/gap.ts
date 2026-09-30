@@ -79,6 +79,8 @@ export type ProjectGap = {
    * 放在这里算，省得每个组件自己判断状态再挑字段。
    */
   displayDaysLeft: number | null;
+  /** displayDaysLeft 倒数的是哪个截止日。「加到日历」按它决定导出哪一天，不在组件里再判一次阶段 */
+  displayDeadline: "apply" | "closing";
   health: ProjectHealth;
   /** 在本课题内被两条以上要求项同时算作达标的成果，界面据此提示重复使用 */
   reusedAchievementIds: string[];
@@ -266,6 +268,7 @@ export function calcProjectGap(project: GapProjectInput, today: Date = new Date(
     daysLeft,
     applyDaysLeft,
     displayDaysLeft: isApplyStage ? applyDaysLeft : daysLeft,
+    displayDeadline: isApplyStage ? "apply" : "closing",
     health: calcHealth(project, totalRequired, totalGap, daysLeft, applyDaysLeft),
     reusedAchievementIds: findReusedAchievements(project.requirements),
   };

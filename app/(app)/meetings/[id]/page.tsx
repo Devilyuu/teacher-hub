@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { AddToCalendarLink } from "@/components/add-to-calendar-link";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { isDesktopEdition } from "@/lib/edition";
 import { formatTimestamp } from "@/lib/format";
 import { integrationStatuses } from "@/lib/integrations";
 import { MEETING_TYPE_LABELS, TASK_SOURCE_LABELS } from "@/lib/labels";
-import { parseAgenda, parseResolutions } from "@/lib/meetings";
+import { isUpcomingMeeting, parseAgenda, parseResolutions } from "@/lib/meetings";
 import { getMeetingDetail, getPendingAgendaItems } from "@/lib/queries/routines";
 import { dueHint, isDone } from "@/lib/tasks";
 import { deleteMeeting } from "../actions";
@@ -31,6 +33,7 @@ export default async function MeetingDetailPage({
   const meeting = await getMeetingDetail((await params).id);
   if (!meeting) notFound();
 
+  const isUpcoming = isUpcomingMeeting(meeting.meetingTime);
   const pool = await getPendingAgendaItems();
   const asrConfigured = integrationStatuses().find((status) => status.key === "asr")?.configured ?? false;
   const minutesConfigured = integrationStatuses().find((status) => status.key === "minutes")?.configured ?? false;
@@ -60,15 +63,28 @@ export default async function MeetingDetailPage({
           </div>
         </div>
 
-        {/* 会议是硬删、没有回收站，原来点一下就没了。
-            文案要把「保留什么」也说出来：派生的任务和议题不跟着删（deleteMeeting 注释），
-            只说「删除」会让人以为连带的待办也没了而不敢删 */}
-        <ConfirmSubmitButton
-          action={deleteMeeting.bind(null, meeting.id)}
-          message={`删除会议「${meeting.title}」？纪要和决议会一起删掉，找不回来。由它派出去的任务和议题会保留。`}
-        >
-          删除会议
-        </ConfirmSubmitButton>
+        <div className="flex items-center gap-2">
+          {/* 只给还没开的会：开过的会加进日历，两条提醒都已经错过了。
+              用 <a> 不用 <Link>——目标是个文件接口，客户端路由和预取都不该碰它 */}
+          {isUpcoming ? (
+            <AddToCalendarLink
+              href={`/api/meetings/${meeting.id}/calendar`}
+              title="下载日历文件，提醒两条：前一天、提前 30 分钟"
+            >
+              加到日历
+            </AddToCalendarLink>
+          ) : null}
+
+          {/* 会议是硬删、没有回收站，原来点一下就没了。
+              文案要把「保留什么」也说出来：派生的任务和议题不跟着删（deleteMeeting 注释），
+              只说「删除」会让人以为连带的待办也没了而不敢删 */}
+          <ConfirmSubmitButton
+            action={deleteMeeting.bind(null, meeting.id)}
+            message={`删除会议「${meeting.title}」？纪要和决议会一起删掉，找不回来。由它派出去的任务和议题会保留。`}
+          >
+            删除会议
+          </ConfirmSubmitButton>
+        </div>
       </header>
 
       <MeetingDetail
@@ -78,6 +94,7 @@ export default async function MeetingDetailPage({
         resolutions={parseResolutions(meeting.resolutions)}
         pool={pool.map((item) => ({ id: item.id, content: item.content }))}
         transcriptionEnabled={meeting.transcriptionEnabled}
+        cloudTranscription={!isDesktopEdition()}
         asrConfigured={asrConfigured}
         minutesConfigured={minutesConfigured}
         recordings={meeting.recordings}

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { dedupeRowsByName } from "@/lib/bulk-import";
 import { prisma } from "@/lib/db";
 import { IDLE_FORM_STATE, toFormState, type FormState } from "@/lib/form-state";
 import { DEFAULT_RECORD_TYPE_NAMES } from "@/lib/queries/students";
@@ -150,7 +151,8 @@ export async function bulkImportStudents(
     select: { name: true },
   });
   const existingNames = new Set(existing.map((row) => row.name));
-  const fresh = rows.filter((row) => !existingNames.has(row.name));
+  // 两头都要去重（库里已有 + 这一块里出现过），口径只此一份
+  const fresh = dedupeRowsByName(rows, existingNames);
 
   if (fresh.length > 0) {
     await prisma.student.createMany({

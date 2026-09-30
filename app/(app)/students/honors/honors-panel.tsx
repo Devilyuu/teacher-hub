@@ -60,7 +60,7 @@ export function HonorsPanel({
           {rows.map((row) => (
             <li key={row.id}>
               <Link
-                href={`/students/honors/${row.id}`}
+                href={`/students/honors/${row.id}?class=${encodeURIComponent(classGroupId)}`}
                 className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
               >
                 <div className="min-w-0 flex-1">

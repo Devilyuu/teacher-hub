@@ -55,6 +55,20 @@ export function closeDocument(): string {
 }
 
 /**
+ * 下载接口先数行（buildBackupMeta）、再写一笔「备份被下载了」的审计（ActivityLog）、然后才出流——
+ * 那笔审计自己也会被导出去，承诺给 ActivityLog 的行数得补上它。
+ *
+ * 不补的话末尾的 assertCountsMatch **每次都差 1**，下载一律以网络错误收场。从全库 JSON 导出上线（672b5a0）
+ * 起就是这样，2026-09-28 在桌面安装版上实测才发现：verify:full-backup 直接调 streamBackup、不走接口
+ */
+export function withOwnAuditRow(meta: BackupMeta): BackupMeta {
+  return {
+    ...meta,
+    tableCounts: { ...meta.tableCounts, ActivityLog: (meta.tableCounts.ActivityLog ?? 0) + 1 },
+  };
+}
+
+/**
  * meta 里承诺的行数与实际写出的行数不一致时抛错。
  *
  * **宁可让下载失败，也不给一个内容与 meta 不符的文件**——同材料 ZIP 那条

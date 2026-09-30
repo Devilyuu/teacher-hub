@@ -432,6 +432,8 @@ model Achievement {
   teachingImports          TeachingImport[]
   /// 由哪些参赛记录引用而来。同样是人工「引用为成果」的产物，不自动建
   competitionEntries       CompetitionEntry[]
+  /// 由哪些学生项目（毕设/大创/作品）引用而来。同上，人工引用才有
+  menteeProjects           MenteeProject[]
 
   /// 历史课题绩效副本迁移后软归档，不删除原始记录
   archivedAt    DateTime?
@@ -484,6 +486,11 @@ model PerfCategory {
   /// 学校当年停用的条目。不删——历史成果可能还挂在上面
   isActive             Boolean @default(true)
   sortOrder            Int     @default(0)
+
+  /// 课题详情「课题绩效事项」能选这一项。**由人在分类表里勾，不按名字猜**：
+  /// 原来是代码里写死的四个小类名，换一所学校一个都对不上（2026-09-27）。
+  /// 当年一项都没勾时，候选是全部启用中的小类（lib/project-performance.ts 的 projectEligibleOf）
+  projectEligible      Boolean @default(false)
 
   achievements             Achievement[]
   projectPerformanceEvents ProjectPerformanceEvent[]
@@ -576,20 +583,23 @@ model PromotionCategory {
   /// 文件版本年度。人事处改表时换年度并存，历史成果仍按当年的表解释
   year Int
 
-  /// 二级指标编号，如 "5.2"。申报表、材料目录里到处引用它，所以它是业务键
+  /// 二级指标编号，如 "5.2"。申报表、材料目录里到处引用它，所以它是业务键。
+  /// 格式不限（"5.2"、"A1"、"（三）2" 都行），排序走 lib/promotion.ts 的自然序比较。
+  /// 原表没有编号时，粘贴导入按顺序编成 1.1、1.2……（lib/import/pasted-table.ts）
   code String
 
   /// 一级指标名，如 "科研成果及业绩"
   majorIndicator String
-  /// 一级指标封顶分，如 50
-  majorCap       Decimal @db.Decimal(6, 2)
+  /// 一级指标封顶分，如 50。别的学校的表不一定有（条件制的表根本不计分），所以可空
+  majorCap       Decimal? @db.Decimal(6, 2)
   /// 二级指标名，如 "纵向课题"
   minorIndicator String
 
   /// 赋分细则原文，**照抄附件2 不解析**。理由同 PerfCategory：
   /// 「国家级每项加6分」「到账经费每10万元0.8分，上限8分」没有统一语法，
-  /// 硬解析必然出错。系统只把规则显示给人看，分数人工填（第 1 条：只计算不判定）
-  scoringRule String
+  /// 硬解析必然出错。系统只把规则显示给人看，分数人工填（第 1 条：只计算不判定）。
+  /// 可空：条件制的表、或者只抄了指标名的表，没有这一格
+  scoringRule String?
   /// 备注原文，装着封顶说明、认定部门、排名系数等无法结构化的要求
   remark      String?
 
@@ -602,10 +612,14 @@ model PromotionCategory {
   /// cap 不是原文直接给出而是推出来时，写清怎么来的（目前只有 2.1）
   capNote  String?
 
-  /// 哪几个申报系列能用这一项（附件1 的 ●/◌）
+  /// 哪几个申报系列能用这一项（附件1 的 ●/◌）。空数组 = 表上不分系列
   appliesTo TitleSeries[]
 
   sortOrder Int @default(0)
+
+  /// 课题（科研页的课题表单）能挂这一项。原来写死 5.2 / 5.3，换一所学校编号就对不上。
+  /// 当年一项都没勾时课题可以挂任意一项（lib/promotion.ts 的 projectIndicatorOptions）
+  projectEligible Boolean @default(false)
 
   achievements Achievement[]
   projects     Project[]
@@ -631,11 +645,12 @@ model PromotionRuleset {
   /// 附件2 末尾的说明，逐条原文
   generalNotes String[]
 
-  /// 四个系列的满分（量化表表头）。各系列之间的差额来自不适用的指标
-  teacherTotal  Decimal @db.Decimal(6, 2)
-  labTotal      Decimal @db.Decimal(6, 2)
-  ideologyTotal Decimal @db.Decimal(6, 2)
-  eduAdminTotal Decimal @db.Decimal(6, 2)
+  /// 四个系列的满分（量化表表头）。各系列之间的差额来自不适用的指标。
+  /// 可空：本校以外的表多半不分这四个系列，粘贴导入和手工录入都不填
+  teacherTotal  Decimal? @db.Decimal(6, 2)
+  labTotal      Decimal? @db.Decimal(6, 2)
+  ideologyTotal Decimal? @db.Decimal(6, 2)
+  eduAdminTotal Decimal? @db.Decimal(6, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -654,7 +669,9 @@ model DocCategory {
 model Attachment {
   id String @id @default(cuid())
 
-  /// 课题、成果、个人常用文档类别、教案回流、学生荣誉、参赛记录六个归属恰好选一个。
+  /// 课题、成果、个人常用文档类别、教案回流、学生荣誉、参赛记录、学生项目
+  /// **七个归属恰好选一个**，靠数据库 CHECK `Attachment_single_owner` 锁死。
+  /// 改归属时两个字段必须在同一条 UPDATE 里——中间态归属数为 0 会被当场拒绝。
   projectId          String?
   project            Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   achievementId      String?
@@ -672,6 +689,9 @@ model Attachment {
   /// 参赛记录的赛事通知、报名表、获奖证书（指导参赛模块）
   competitionEntryId String?
   competitionEntry   CompetitionEntry? @relation(fields: [competitionEntryId], references: [id], onDelete: Cascade)
+  /// 学生项目的任务书、开题报告、中期检查表、作品文件、评审表（学业导师模块）
+  menteeProjectId    String?
+  menteeProject      MenteeProject?    @relation(fields: [menteeProjectId], references: [id], onDelete: Cascade)
 
   kind        AttachmentKind @default(OTHER)
   /// 材料编号（prd-support 5）。要在申报表、材料目录、ZIP 文件名里保持一致。
@@ -698,6 +718,7 @@ model Attachment {
   @@index([teachingImportId])
   @@index([studentHonorId])
   @@index([competitionEntryId])
+  @@index([menteeProjectId])
 }
 
 /// 教案回流状态（规格 6.6）。
@@ -1282,6 +1303,8 @@ model Student {
   checkmarks         RosterCheckmark[]
   /// 参加过的比赛（可选关联：参赛名单以姓名文本为准）
   competitionMembers CompetitionMember[]
+  /// 也在我的导师名单里（可选关联，同上：导师名单以姓名文本为准）
+  mentees            Mentee[]
   honorMembers       StudentHonorMember[]
   recordMembers      StudentRecordMember[]
   relationsA         StudentRelation[]     @relation("RelationA")
@@ -1622,6 +1645,265 @@ model CompetitionCoach {
   @@index([teacherId])
 }
 
+// ─── 学业导师（可选模块 mentor）─────────────────────────────────────
+//
+// 定位：学校的毕设管理系统与导师双选系统是判定/审批系统（选题审核、成绩、
+// 查重、名额录取都归它们，**这里一概不做、不对接、不存影子数据**）；
+// 本模块只存它们不存的工作痕迹——我带了谁、什么时候谈了什么。
+//
+// **键名当心**：`advisor` 是班主任（/students），`mentor` 才是学业导师
+// （/mentees）。英文 advisor 本义就是「导师」，两个词在中文里都像「导师」，
+// 但它们是两个模块、两套表、两个开关。
+//
+// 属**个人域**（CLAUDE.md 第 13 条）：学生姓名与班主任模块同级敏感。
+//
+// 规格：docs/superpowers/specs/2026-09-21-mentor-module-design.md
+
+/// 带教批次。对应班主任模块的 ClassGroup：一个域的容器。
+/// 带完一届整批归档——名单折叠起来，指导记录还查得到。
+model MenteeBatch {
+  id   String  @id @default(cuid())
+  /// 「2023 级数媒（首届）」
+  name String  @unique
+  /// 入学年份。届次分组与排序靠它，所以是数字不是从名字里抠
+  year Int
+  note String?
+
+  /// 带完了就归档，不占默认视图但可检索；**不删**
+  archivedAt DateTime?
+
+  /// 预留给将来的多账号版，现在恒为 null（第 13 条）。
+  /// 学生与记录经 batchId 归属，不各自重复占位
+  ownerId String?
+
+  mentees  Mentee[]
+  records  MenteeRecord[]
+  projects MenteeProject[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([archivedAt, year])
+}
+
+/// 我名下的学生。
+///
+/// **不是 Student 的副本，也不复用 Student**：Student.classGroupId 必填，
+/// 而导师学生跨班、按年级成批，班主任模块还默认关着。复用只有两条路——
+/// 造一个假班级装他们（污染名册、宿舍视图、勾名单），或者把 classGroupId
+/// 改成可空（为新模块去动一个已上线模块的核心约束）。两条都倒挂。
+///
+/// 采用 CompetitionMember 的先例：**姓名文本永远是真相，关联在册学生是可选的**。
+/// 同一个学生同时出现在班主任名册、参赛名单、导师名单里，三处各存一份姓名，
+/// 这是**已经接受的代价，不是 bug**。
+model Mentee {
+  id      String      @id @default(cuid())
+  batchId String
+  batch   MenteeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// 姓名原文。**永远是真相**，关联只是锦上添花
+  name      String
+  /// 班主任模块开着、且这名学生在册时可以挂上。
+  /// SetNull 不 Cascade：班主任那边删了记录，我的名单上这个名字还得在
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  studentNo String?
+  /// 班级**原文**，「数媒 2301」。不是外键——跨班带学生时，
+  /// 对方班级根本不在我的名册里
+  className String?
+  phone     String?
+  /// 敏感：家庭情况、学业状态、生涯意向
+  note      String?
+
+  /// false = 已毕业 / 退出双选。**不删**——指导记录还挂在名下
+  active Boolean @default(true)
+
+  recordMembers  MenteeRecordMember[]
+  projectMembers MenteeProjectMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([batchId, active])
+  @@index([studentId])
+}
+
+/// 指导记录类型字典（第 12 条：字典是表不是自由文本）。
+/// 建批次时补种默认值，skipDuplicates 保证删过的不复活。
+/// 资助、评优、处分这类**不建**——那是学校平台的词汇表，建了就是做影子系统
+model MenteeRecordType {
+  id   String  @id @default(cuid())
+  name String  @unique
+  note String?
+
+  createdAt DateTime       @default(now())
+  records   MenteeRecord[]
+}
+
+/// 指导记录流水：见面、学业指导、毕设指导、生涯规划。
+///
+/// 主入口是**顶栏速记**（收件箱多一个「归到导师学生」去向），
+/// 不是「打开模块填表单」——后者和学校平台一个下场：有任务才打开。
+///
+/// 学期末那张「学业导师工作记录表」就是从这里筛出来导出的。
+model MenteeRecord {
+  id      String      @id @default(cuid())
+  batchId String
+  batch   MenteeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  typeId String
+  /// Restrict 不 Cascade：删类型不该连记录一起删（同 StudentRecordType 的取舍）
+  type   MenteeRecordType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  /// 谈话日。**纯日期**走 lib/date.ts。老师记当天的事，精确到日是常态，
+  /// 不需要 datePrecision 那套——那是给外来的模糊日期准备的
+  date    DateTime @db.Date
+  content String
+
+  /// 这次指导围绕哪个项目谈的。**可空**——大量指导跟项目无关（学业、生涯）。
+  /// 「一人一张毕设指导记录表」就是按它 + 成员筛出来的
+  projectId String?
+  /// SetNull 不 Cascade：项目删了，谈过的话还在
+  project   MenteeProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  members      MenteeRecordMember[]
+  /// 由哪条速记转来（同 Task/Achievement/Meeting/StudentRecord 的转换指针）
+  capturedFrom CaptureItem?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([batchId, date])
+  @@index([typeId])
+  @@index([projectId])
+}
+
+/// 记录 ↔ 学生。0 个 = 整批范围（集体见面会），1+ 个 = 点名的那几个。
+///
+/// **显式连接表而不是 Prisma 隐式 m2m**：隐式表不是 model，
+/// 全库 JSON 备份的表清单看不见它（lib/backup/tables.test.ts 会红）
+model MenteeRecordMember {
+  id       String       @id @default(cuid())
+  recordId String
+  record   MenteeRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  menteeId String
+  mentee   Mentee       @relation(fields: [menteeId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, menteeId])
+  @@index([menteeId])
+}
+
+/// 学生项目类型字典（第 12 条）。补种：毕业设计 / 大创项目 / 课程作品 / 实习项目。
+/// 案例索引按类型分组，是**统计口径**，所以必须是表不是自由文本
+model MenteeProjectKind {
+  id        String @id @default(cuid())
+  name      String @unique
+  sortOrder Int    @default(0)
+
+  projects MenteeProject[]
+
+  createdAt DateTime @default(now())
+}
+
+/// 学生项目：毕业设计、大创、课程作品。
+///
+/// **不叫「毕设」而叫「项目」**：仓库里 `索引样式/学生项目案例索引.md` 那张空表
+/// 的说明文字已经把范围写好了——竞赛、毕业设计、APP 设计、AI 短片、创新创业。
+/// 只做毕设的话，那张索引还是填不起来。
+///
+/// 与参赛模块的关系：同一件作品既是毕设、又拿去参赛，**两边各记一条，
+/// 不自动同步**（同「荣誉库与成果台账不合并」的先例）。参赛那条记赛段和证书，
+/// 这条记题目和指导过程。
+///
+/// **学校的毕设管理系统管选题审核、成绩、查重，这里一概不做、不存影子数据。**
+model MenteeProject {
+  id      String      @id @default(cuid())
+  batchId String
+  batch   MenteeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// 题目原文，「基于 AI 的非遗纹样生成工具」
+  title  String
+  kindId String
+  /// Restrict 不 Cascade：删类型不该把项目一起带走（同 MenteeRecordType 的取舍）
+  kind   MenteeProjectKind @relation(fields: [kindId], references: [id], onDelete: Restrict)
+
+  /// 学年原文，「2025—2026 学年」。毕设按学年不按自然年，而学年跨年——
+  /// 存原文比存两个数字诚实（第 8 条铁律的同一条）
+  schoolYear String?
+
+  /// 结项 / 完成情况**原文**，「校级优秀毕业设计」「入选市高校优秀毕设联展」。
+  /// 照原样存、照原样显示，引用为成果时拿它当标题（同 awardTitle 的先例）。
+  /// **不设枚举**——「优秀」「联展入选」「答辩通过」不在一套坐标系的刻度上
+  outcomeText String?
+
+  note String?
+
+  /// 用户点「引用为成果」后才有（M3）。**不自动创建**（第 1 条铁律）
+  achievementId String?
+  achievement   Achievement? @relation(fields: [achievementId], references: [id], onDelete: SetNull)
+
+  members     MenteeProjectMember[]
+  milestones  MenteeProjectMilestone[]
+  records     MenteeRecord[]
+  /// 任务书、开题报告、中期检查表、作品文件、定稿、评审表
+  attachments Attachment[]
+
+  /// 预留给将来的多账号版，现在恒为 null（第 13 条）
+  ownerId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([batchId, createdAt])
+  @@index([kindId])
+}
+
+/// 项目 ↔ 学生。**不设单独的「主责学生」列**：一人一题是常态、团队作品也有，
+/// 两处存学生早晚不一致。`orderIndex` 最小的那个就是主责（同 CompetitionMember）
+model MenteeProjectMember {
+  id        String        @id @default(cuid())
+  projectId String
+  project   MenteeProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  menteeId  String
+  mentee    Mentee        @relation(fields: [menteeId], references: [id], onDelete: Cascade)
+
+  /// 署名次序，0 = 主责
+  orderIndex Int @default(0)
+
+  @@unique([projectId, menteeId])
+  @@index([menteeId])
+}
+
+/// 项目的关键节点：开题、中期检查、答辩、作品提交。
+///
+/// **是记录不是关卡**（第 1 条铁律 + 「本平台不是工作流工具」）：
+/// 没有「完成」标记、没有顺序约束、没有「上一步没过不许下一步」。
+/// 有日期就说明它排在那天，情况写 note。界面上画成时间序列表而不是步骤条——
+/// 步骤条会被读成关卡。
+model MenteeProjectMilestone {
+  id        String        @id @default(cuid())
+  projectId String
+  project   MenteeProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// 节点名，自由文本 + 界面给建议值（开题 / 中期检查 / 答辩 / 作品提交）。
+  /// **为什么不上字典表**：第 12 条的理由是「多打一个字就被算成两家，没法统计」，
+  /// 而节点名不进任何统计与筛选（筛选按日期和项目走），字典在这里只是维护负担。
+  /// 若将来导出模板要求固定节点名，再升字典表——加表 + 回填，成本很低
+  label String
+
+  /// **纯日期**走 lib/date.ts。只知道「五月底答辩」就留空写进 note，
+  /// 不许硬转精确日期（第 8 条铁律）——它要进月历和首页倒计时
+  date DateTime? @db.Date
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, date])
+  @@index([date])
+}
+
 // ─── 快速记录收件箱 ──────────────────────────────────────────────────
 
 /// 速记的去处。选错不要紧，收件箱里能改
@@ -1675,6 +1957,11 @@ model CaptureItem {
   /// 班主任模块：速记归到某个学生名下的谈话/事件记录
   convertedStudentRecordId String?        @unique
   convertedStudentRecord   StudentRecord? @relation(fields: [convertedStudentRecordId], references: [id], onDelete: SetNull)
+  /// 导师模块：速记归到导师学生名下的指导记录。
+  /// **不复用上面那个指针**——两个模块的记录是两张表，共用一列就等于
+  /// 让「关掉班主任」这件事再也干不干净
+  convertedMenteeRecordId  String?        @unique
+  convertedMenteeRecord    MenteeRecord?  @relation(fields: [convertedMenteeRecordId], references: [id], onDelete: SetNull)
 
   /// 预留给将来的多账号版，现在恒为 null（CLAUDE.md 第 13 条）
   ownerId String?

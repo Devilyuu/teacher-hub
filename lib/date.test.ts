@@ -5,6 +5,7 @@ import {
   formatDateOnly,
   formatYearMonth,
   formatYearOnly,
+  isTodayOrLater,
   todayAsDateOnly,
 } from "./date";
 
@@ -65,6 +66,16 @@ describe("diffInDays", () => {
 
   it("闰年二月算得对", () => {
     expect(diffInDays(dateOnly(2028, 3, 1), dateOnly(2028, 2, 28))).toBe(2);
+  });
+});
+
+describe("isTodayOrLater", () => {
+  const today = dateOnly(2026, 9, 22);
+
+  it("今天算在内，明天算，昨天不算", () => {
+    expect(isTodayOrLater(dateOnly(2026, 9, 22), today)).toBe(true);
+    expect(isTodayOrLater(dateOnly(2026, 9, 23), today)).toBe(true);
+    expect(isTodayOrLater(dateOnly(2026, 9, 21), today)).toBe(false);
   });
 });
 

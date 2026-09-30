@@ -40,12 +40,29 @@ export function formMessageClass(
   return `${size === "sm" ? "text-sm" : "text-xs"} ${FORM_MESSAGE_TONE_CLASS[tone]}`;
 }
 
-/** 把 zod 的错误摊平成 FormState */
+/**
+ * 把 zod 的错误摊平成 FormState。
+ *
+ * 整体提示**直接说出第一条原因**，不再是「看下标红的地方」：不少表单只渲染
+ * `state.message`、不画字段级报错，那句话在它们那里是个兑现不了的承诺——
+ * 2026-09-24 用户建批次时就是看着这句话、满屏找不到一处红。
+ *
+ * schema 里写的中文提示才是给人看的；zod 自带的英文报错（「expected string,
+ * received undefined」）几乎都是表单和 schema 对不上，**不是用户填错了**，
+ * 照实说是系统的问题，并带上字段名方便报给维护的人
+ */
 export function toFormState(error: z.ZodError): FormState {
   const fieldErrors: Record<string, string[]> = {};
   for (const issue of error.issues) {
     const key = issue.path.join(".") || "_";
     (fieldErrors[key] ??= []).push(issue.message);
   }
-  return { ok: false, message: "有几项没填对，看下标红的地方", fieldErrors };
+
+  const [first, ...rest] = error.issues;
+  if (!first) return { ok: false, message: "没保存成功，请重试", fieldErrors };
+  const reason = /[一-鿿]/.test(first.message)
+    ? first.message
+    : `「${first.path.join(".") || "表单"}」这一项和系统对不上，不是你填错了，请把这句话告诉维护的人`;
+  const message = rest.length > 0 ? `${reason}（另有 ${rest.length} 处没填对）` : reason;
+  return { ok: false, message, fieldErrors };
 }

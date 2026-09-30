@@ -1,6 +1,20 @@
 import "server-only";
 import ExcelJS from "exceljs";
+import { formatDateOnly } from "@/lib/date";
+import { promotionWindow } from "@/lib/promotion";
 import type { DeclarationPackage } from "./declaration";
+import type { DeclarationExportProfile } from "./fingerprint";
+
+/**
+ * 职称表抬头那一行「取数范围」。交上去的表要能自证：哪天起算、算到哪天，
+ * 不然评审一看 2027 年申报的表里全是 2020–2026 年的东西，会以为导错了
+ */
+export function promotionPeriodLine(year: number, titleSince: Date | null): string {
+  const window = promotionWindow(titleSince, year);
+  return window.from
+    ? `取数范围：任现职以来，${formatDateOnly(window.from)} 至 ${window.toYear}-12-31`
+    : `取数范围：算到 ${window.toYear}-12-31（档案未填任现职日期，没有起点）`;
+}
 
 /**
  * 把申报包写成 Excel（BUILD_PLAN Phase 2 验收目标）。
@@ -13,7 +27,7 @@ import type { DeclarationPackage } from "./declaration";
  */
 export async function buildDeclarationWorkbook(
   pkg: DeclarationPackage,
-  meta: { name: string; unit: string },
+  meta: DeclarationExportProfile,
   quality?: {
     issues: Array<{ code: string; label: string; count: number; detail: string }>;
   },
@@ -26,23 +40,46 @@ export async function buildDeclarationWorkbook(
   const scoreLabel = isPromotion ? "职称量化分" : "申报分";
   const groupLabel = isPromotion ? "二级指标" : "小类";
   const parentLabel = isPromotion ? "一级指标" : "大类";
+  // 职称表的年份是申报年度，不是成果年度，标题里别写「2027 年度」
+  const titleOf = (suffix: string) =>
+    isPromotion ? `按 ${pkg.year} 年申报 · 职称量化${suffix}` : `${pkg.year} 年度绩效${suffix}`;
 
   // ── 汇总表 ──
   const summary = book.addWorksheet("汇总");
-  summary.addRow([`${pkg.year} 年度${isPromotion ? "职称量化" : "绩效"}申报汇总`]);
+  summary.addRow([titleOf("申报汇总")]);
   summary.addRow([`${meta.name}　${meta.unit}`]);
+  if (isPromotion) summary.addRow([promotionPeriodLine(pkg.year, meta.currentTitleSince)]);
   summary.addRow([]);
-  summary.addRow([parentLabel, groupLabel, "条数", scoreLabel]);
+  const headerRow = summary.addRow([parentLabel, groupLabel, "条数", scoreLabel]);
 
   for (const group of pkg.groups) {
     summary.addRow([group.parent, group.label, group.rows.length, group.subtotal]);
   }
   summary.addRow([]);
-  summary.addRow(["合计", "", pkg.groups.reduce((n, g) => n + g.rows.length, 0), pkg.total]);
+  const totalRow = summary.addRow([
+    "合计",
+    "",
+    pkg.groups.reduce((n, g) => n + g.rows.length, 0),
+    pkg.total,
+  ]);
+  totalRow.font = { bold: true };
+
+  // 职称包：原始分合计之外，另起一行写按量化表封顶截完的合计，再逐条列被截掉的栏。
+  // 两个数都写——人事处核的是封顶后的数，而明细里每条的原始分要和它对得上账
+  if (pkg.caps) {
+    const cappedRow = summary.addRow(["封顶后合计", "", "", pkg.caps.cappedTotal]);
+    cappedRow.font = { bold: true };
+    if (pkg.caps.overCap.length > 0) {
+      summary.addRow([]);
+      summary.addRow(["超出上限的部分不计入："]);
+      for (const over of pkg.caps.overCap) {
+        summary.addRow([over.label, `原始 ${over.raw} 分，上限 ${over.cap} 分`, "", over.cap]);
+      }
+    }
+  }
 
   summary.getRow(1).font = { bold: true, size: 14 };
-  summary.getRow(4).font = { bold: true };
-  summary.lastRow!.font = { bold: true };
+  headerRow.font = { bold: true };
   summary.columns = [{ width: 22 }, { width: 34 }, { width: 8 }, { width: 12 }];
 
   // ── 明细表（材料目录）──
@@ -93,7 +130,7 @@ export async function buildDeclarationWorkbook(
 
   if (quality) {
     const notes = book.addWorksheet("质量说明");
-    notes.addRow([`${pkg.year} 年度带问题导出质量说明`]);
+    notes.addRow([titleOf("表 · 带问题导出质量说明")]);
     notes.addRow(["这份工作簿覆盖了安全默认筛选，提交前请逐项核对。"]);
     notes.addRow(["问题", "条数", "说明", "代码"]);
     for (const issue of quality.issues) {

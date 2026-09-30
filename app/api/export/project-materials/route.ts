@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { loadProjectMaterialSources } from "@/lib/export/material-sources";
 import { buildMaterialZipPlan } from "@/lib/export/materials-zip";
-import { isSameOrigin } from "@/lib/export/request";
+import { isSameOriginRequest } from "@/lib/export/request";
 import { openUploadStream } from "@/lib/storage";
 import { sessionGuard } from "@/lib/server-auth";
 import { zipStream, type ZipSource } from "@/lib/zip";
@@ -26,8 +26,7 @@ export async function POST(request: Request) {
   const denied = await sessionGuard();
   if (denied) return denied;
 
-  const requestUrl = new URL(request.url);
-  if (!isSameOrigin(requestUrl, request.headers.get("origin"))) {
+  if (!isSameOriginRequest(request)) {
     return Response.json({ error: "拒绝跨站导出请求" }, { status: 403 });
   }
 

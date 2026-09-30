@@ -49,6 +49,7 @@
       "major_indicator": "科研成果",
       "major_cap": 24,
       "minor_indicator": "纵向课题",
+      "project_eligible": true,
       "scoring_rule": "国家级每项 8 分，省级 5 分，市级 2 分",
       "remark": "与 2.1 合并封顶 12 分",
       "cap": 12,

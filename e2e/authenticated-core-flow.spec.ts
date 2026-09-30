@@ -3,6 +3,21 @@ import ExcelJS from "exceljs";
 import { readFile } from "node:fs/promises";
 import { countExactCellMatches } from "../scripts/e2e-runner-helpers.mjs";
 
+/** 从尾部读 ZIP 中央目录列出条目名（同 lib/zip.test.ts：对着字节断言，不依赖解压工具） */
+function zipEntryNames(zip: Buffer): string[] {
+  const eocd = zip.length - 22;
+  expect(zip.readUInt32LE(eocd)).toBe(0x06054b50);
+  const count = zip.readUInt16LE(eocd + 10);
+  let cursor = zip.readUInt32LE(eocd + 16);
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const nameLength = zip.readUInt16LE(cursor + 28);
+    names.push(zip.subarray(cursor + 46, cursor + 46 + nameLength).toString("utf8"));
+    cursor += 46 + nameLength + zip.readUInt16LE(cursor + 30) + zip.readUInt16LE(cursor + 32);
+  }
+  return names;
+}
+
 test("authenticated achievement, attachment, export, and logout flow", async ({ page }) => {
   const runId = process.env.E2E_RUN_ID;
   const passcode = process.env.E2E_PASSCODE;
@@ -58,6 +73,22 @@ test("authenticated achievement, attachment, export, and logout flow", async ({ 
     if (Array.isArray(row.values)) rows.push(row.values);
   });
   expect(countExactCellMatches(rows, title)).toBe(1);
+
+  // 申报包 ZIP：上面传的那份附件要出现在「支撑材料」里，编号就是它在明细表里的序号
+  const rowIndex = rows.find((cells) => cells.includes(title))?.[1];
+  expect(typeof rowIndex).toBe("number");
+  await exportForm
+    .locator("xpath=..")
+    .getByRole("checkbox", { name: /连同支撑材料打包/ })
+    .check();
+  const zipDownload = page.waitForEvent("download");
+  await exportForm.getByRole("button").click();
+  const zip = await readFile(await (await zipDownload).path());
+  const entries = zipEntryNames(zip);
+  expect(entries[0]).toBe(`${year}年度绩效申报表.xlsx`);
+  expect(entries).toContainEqual(
+    expect.stringMatching(new RegExp(`^支撑材料/0*${rowIndex}-1_[^_]+_e2e-fixture\\.txt$`)),
+  );
 
   await page.getByRole("button", { name: "退出" }).click();
   await expect(page).toHaveURL(/\/login$/);

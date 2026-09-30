@@ -8,7 +8,7 @@
  * 可重复执行：按 name 做 upsert，重跑不会产生重复行。
  */
 import "dotenv/config";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -21,13 +21,13 @@ if (!connectionString) {
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
-const DOC_CATEGORIES = [
-  { name: "人才培养方案", sortOrder: 10 },
-  { name: "课程标准", sortOrder: 20 },
-  { name: "申报参考", sortOrder: 30 },
-  { name: "制度文件", sortOrder: 40 },
-  { name: "其他", sortOrder: 50 },
-];
+/**
+ * 通用文档分类。名单放在 JSON 里，是因为桌面版（desktop/）不带 tsx 跑不了这个脚本，
+ * 第一次建库后由主进程读同一份文件用 SQL 插（desktop/src/defaults.ts）——两处各写一份早晚对不上
+ */
+const DOC_CATEGORIES = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, "defaults", "doc-categories.json"), "utf8"),
+) as Array<{ name: string; sortOrder: number }>;
 
 async function seedDocCategories() {
   for (const category of DOC_CATEGORIES) {

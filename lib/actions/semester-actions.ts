@@ -35,7 +35,10 @@ export async function createSemester(
   return { ...IDLE_FORM_STATE, ok: true, message: "已设置" };
 }
 
-/** 硬删。学期只是显示锚点，没有任何记录挂在它上面，删错了重设一条就是 */
+/**
+ * 硬删。课表条目（TimetableSlot）挂在学期下、外键 Cascade，会跟着一起没——
+ * 所以界面的确认文案必须写明「连同 N 条课表」，不能只问「删除学期？」
+ */
 export async function deleteSemester(id: string) {
   await requireSession();
   await prisma.semester.delete({ where: { id } });

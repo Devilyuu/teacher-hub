@@ -4,13 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { AddToCalendarLink } from "@/components/add-to-calendar-link";
 import { Button } from "@/components/ui/button";
 import {
   TASK_PRIORITY_LABELS,
   TASK_SOURCE_LABELS,
   TASK_STATUS_LABELS,
 } from "@/lib/labels";
-import { dueHint, type TaskLike } from "@/lib/tasks";
+import { dueHint, isWaitingOn, type TaskLike } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
 import { deleteTask, restoreTask, toggleTaskDone } from "./actions";
 import type { TaskPriority, TaskSource, TaskStatus } from "@/lib/generated/prisma/enums";
@@ -18,6 +19,8 @@ import type { TaskPriority, TaskSource, TaskStatus } from "@/lib/generated/prism
 export type TaskRowData = TaskLike & {
   id: string;
   title: string;
+  /** 负责人；不是「我」时行上多一个「等：某某」徽章，和首页「等别人」对得上 */
+  assignee: string;
   source: TaskSource;
   priority: TaskPriority;
   status: TaskStatus;
@@ -61,6 +64,9 @@ export function TaskRow({ task, onEdit }: { task: TaskRowData; onEdit: () => voi
   const [pending, setPending] = useState(false);
   const done = task.status === "DONE";
   const hint = dueHint(task);
+  // 「加到日历」只给没做完、还没过期的：任务不整体导出（勾完成后手机上照样响），
+  // 这个按钮是给「挑一两条真怕忘的」用的，所以和删除一样平时压暗
+  const canAddToCalendar = !done && hint != null && hint.tone !== "overdue";
 
   return (
     // **一条任务不再是一张卡片。** 卡片墙是给看板上 25 张课题卡设计的；
@@ -105,6 +111,11 @@ export function TaskRow({ task, onEdit }: { task: TaskRowData; onEdit: () => voi
             而这些标签短到完全放得进标题右边的空白里 */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <SourceBadge source={task.source} />
+          {isWaitingOn(task) ? (
+            <span className="rounded border px-1.5 py-0.5 text-muted-foreground">
+              等：{task.assignee}
+            </span>
+          ) : null}
           {task.priority !== "NORMAL" ? (
             <span className="rounded border px-1.5 py-0.5 text-muted-foreground">
               {TASK_PRIORITY_LABELS[task.priority]}优先
@@ -126,7 +137,7 @@ export function TaskRow({ task, onEdit }: { task: TaskRowData; onEdit: () => voi
             </Link>
           ) : null}
           {task.tags.map((tag) => (
-            <span key={tag} className="text-muted-foreground/70">
+            <span key={tag} className="text-muted-foreground">
               #{tag}
             </span>
           ))}
@@ -136,6 +147,14 @@ export function TaskRow({ task, onEdit }: { task: TaskRowData; onEdit: () => voi
           <p className="w-full text-xs whitespace-pre-wrap text-muted-foreground">{task.note}</p>
         ) : null}
       </div>
+
+      {canAddToCalendar ? (
+        <AddToCalendarLink
+          href={`/api/tasks/${task.id}/calendar`}
+          title={`把「${task.title}」的到期日加到手机日历，提醒前一天 20:00、当天 8:00`}
+          className="shrink-0 self-center opacity-40 transition-opacity group-hover/row:opacity-100"
+        />
+      ) : null}
 
       {/* 平时压暗，指到这一行才实体化。**不做 `opacity-0`**——
           那样在触摸屏上就永远点不到删除了，而这台机器的用户是会用手机的 */}

@@ -1,3 +1,5 @@
+import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 
 /** 成果库列表用的视图，附带挂接情况 */
@@ -65,7 +67,10 @@ export async function getAchievementList() {
   });
 }
 
-export async function getAchievementDetail(id: string) {
+// generateMetadata 和页面各调一次，同一请求只查一次
+export const getAchievementDetail = cache(getAchievementDetailUncached);
+
+async function getAchievementDetailUncached(id: string) {
   const active = await prisma.achievement.findUnique({
     where: { id, archivedAt: null },
     include: {
@@ -92,7 +97,7 @@ export async function getAchievementDetail(id: string) {
           },
         },
       },
-      // 「引用为成果」的来源。两类走同一个模式（外部/过程记录留在自己表里，
+      // 「引用为成果」的来源。几类走同一个模式（外部/过程记录留在自己表里，
       // 人工引用才建成果），所以一起取、一起渲染——见 lib/outcomes/achievement-source.ts
       competitionEntries: {
         select: {
@@ -102,6 +107,9 @@ export async function getAchievementDetail(id: string) {
           level: true,
           competition: { select: { name: true } },
         },
+      },
+      menteeProjects: {
+        select: { id: true, title: true, schoolYear: true, kind: { select: { name: true } } },
       },
       teachingImports: {
         select: { id: true, title: true, courseName: true, term: true },

@@ -153,8 +153,11 @@
   --pill-shadow: 0 1px 2px rgb(16 30 28 / 4%);
 
   /* 画布是**带一点青的淡灰**，卡片纯白。色相跟着主色走——
-     这是参考的那几张图里每套配色都有的性质：底色是主色兑了 95% 的白。 */
-  --background: #f3f6f5;
+     这是参考的那几张图里每套配色都有的性质：底色是主色兑了 95% 的白。
+     2026-09-15 从 #f3f6f5 调深到 #ebf1f0：原来白卡对画布只有 1.09、侧栏又是纯白，
+     整屏一档明度，用户说「白乎乎一片」。**这已是门禁允许的下限**——主色字压画布
+     4.57、次要字 4.63，再深就得先动那两个文字色的明度。 */
+  --background: #ebf1f0;
   --foreground: #17201f;
 
   --card: #ffffff;
@@ -170,14 +173,24 @@
      和翠绿（色相 160）差了 20 度，配合形态区分（主色只出现在导航激活、
      按钮、链接上，从不做成"实心圆点 + 文字"）足够分开。
      换主色前先看一眼还剩什么色能用：红/橙/琥珀/翠绿/天蓝/紫罗兰
-     全被健康度占了。 */
-  --primary: #0e9384;
+     全被健康度占了。
+
+     **明度按对比度定，不按样张定**（2026-09-14）。改版时是 #0e9384，
+     白字压上去只有 3.80:1，14px 按钮字和手机底栏 11px 的激活项都不够
+     4.5:1。调深到 #0b7a6d，色相没动（仍是 173°），白字 5.23、
+     落在画布上 4.81。它本来就是下面 --accent-foreground 的值，
+     不是新引进的颜色。lib/design-contract.test.ts 有对比度门禁，
+     再往亮里调会红。 */
+  --primary: #0b7a6d;
   --primary-foreground: #ffffff;
 
   --secondary: #eef3f2;
   --secondary-foreground: #1e2928;
   --muted: #eef3f2;
-  --muted-foreground: #65756f;
+  /* 次要文字。原 #65756f 落在画布上 4.46:1，差一点不到线；
+     well 上更低。**别再给它叠 /70 这类透明度当「更次要」**——
+     叠完只剩 2.9，要弱化就缩字号或去掉那行字 */
+  --muted-foreground: #5f6f69;
   --accent: #e3f4f1;
   --accent-foreground: #0b7a6d;
 
@@ -185,24 +198,26 @@
 
   --border: #e4eae9;
   --input: #dde5e3;
-  --ring: #0e9384;
+  --ring: #0b7a6d;
 
   /* 图表用色：主色的深浅 + 两档中性。
      **不要往这里塞健康度那六个色相**——图表是装饰层。 */
-  --chart-1: #0e9384;
+  --chart-1: #0b7a6d;
   --chart-2: #5cc5b8;
   --chart-3: #9ad8cf;
   --chart-4: #64748b;
   --chart-5: #cbd5e1;
 
-  --sidebar: #ffffff;
+  /* 侧栏淡青，比画布多一点色度（2026-09-15，原来纯白）。次要字压上去 4.63。
+     当前项因此是白色胶囊（side-nav.tsx）——--accent 的淡青底落在这里看不见 */
+  --sidebar: #e7f2f0;
   --sidebar-foreground: #17201f;
-  --sidebar-primary: #0e9384;
+  --sidebar-primary: #0b7a6d;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #e3f4f1;
   --sidebar-accent-foreground: #0b7a6d;
-  --sidebar-border: #e4eae9;
-  --sidebar-ring: #0e9384;
+  --sidebar-border: #d9e6e3;
+  --sidebar-ring: #0b7a6d;
 
   /* ── 装饰色板：功能图标的底片 ──────────────────────────
      形态锁死：淡底 + 线性描边图标。永不实心、永不承载语义。
@@ -460,7 +475,7 @@
   .greeting-band {
     @apply relative overflow-hidden rounded-xl border px-5 py-5 sm:px-7 sm:py-6;
     background: color-mix(in srgb, var(--primary) 6%, var(--card));
-    border-color: color-mix(in srgb, var(--primary) 14%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 20%, transparent);
   }
 
   /* 装饰图标的圆片。淡底 + 线性图标，**永远成对出现**：
@@ -482,5 +497,19 @@
      需要写进变体（`[&>p]:…`）时用 `max-w-measure`，同一个值。 */
   .measure {
     max-width: var(--container-measure);
+  }
+}
+
+/* 系统里开了「减少动态效果」（晕动症、前庭敏感的人会开）时，过渡和动画一律压到瞬间完成。
+   只压时长、不删过渡：状态照样变，只是不再「动」过去——对话框照常出现、侧栏照常收起。
+   写在所有 @layer 之外，否则压不过 utilities 层里的 transition-*（同侧栏收起那几条的理由） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

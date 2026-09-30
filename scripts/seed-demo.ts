@@ -17,6 +17,17 @@ import { dirname, resolve } from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { dateOnly } from "../lib/date";
+import {
+  buildPerformancePackage,
+  buildPromotionPackage,
+  filterForDeclaration,
+  withPromotionCaps,
+} from "../lib/export/declaration";
+import { buildDeclarationMaterialPlan } from "../lib/export/declaration-materials";
+import { preflightDeclaration } from "../lib/export/preflight";
+import { buildExportRunData } from "../lib/export/run";
+import { loadDeclarationExportSources } from "../lib/export/sources";
+import { compareIndicatorCode } from "../lib/promotion";
 
 // ─── 护栏 ────────────────────────────────────────────────────────────
 
@@ -221,6 +232,14 @@ type PerfSeed = {
   isTeam?: boolean;
 };
 
+/** 课题绩效事项能挂的几项（分类表上的「课题可挂」）。和真实数据一样，由人勾，不按名字猜 */
+const DEMO_PROJECT_PERF_MINORS = new Set([
+  "纵向科研项目立项",
+  "纵向科研项目结题",
+  "教改项目立项",
+  "横向技术服务到账经费",
+]);
+
 const PERF_CATEGORIES: PerfSeed[] = [
   { major: "教科研项目", minor: "纵向科研项目立项", base: "3/项", national: "30/项", provincial: "15/项", city: "8/项", school: "3/项", remark: "基本分与级别分相加；未获立项只计基本分" },
   { major: "教科研项目", minor: "纵向科研项目结题", base: "2/项", national: "20/项", provincial: "10/项", city: "5/项", school: "2/项", remark: "以结题证书落款日期所在年度申报" },
@@ -274,6 +293,8 @@ async function seedPerfCategories() {
         remark: item.remark ?? null,
         isTeam: item.isTeam ?? false,
         isDepartmentAssigned: item.minor === "年度教学质量考核优秀",
+        // 课题详情「课题绩效事项」只列这几项（分类表里的「课题可挂」）
+        projectEligible: DEMO_PROJECT_PERF_MINORS.has(item.minor),
         sortOrder: (index + 1) * 10,
       },
     });
@@ -374,6 +395,8 @@ async function seedPromotionCategories() {
         capGroup: item.capGroup ?? item.code,
         capNote: item.capNote ?? null,
         appliesTo: item.appliesTo ?? [...ALL_SERIES],
+        // 课题表单的职称指标只列这两项（分类表里的「课题可挂」）
+        projectEligible: item.code === "5.2" || item.code === "5.3",
         sortOrder: (index + 1) * 10,
       },
     });
@@ -2141,16 +2164,61 @@ async function seedActivityLog(
   }
 }
 
+/**
+ * 导出记录。申报表那两条**用真管线生成**（和导出接口同一套筛选、组表、快照），
+ * 导出页「最近导出」点进去看得到当时逐行报了什么；原来写的是 `{ note: "快照略" }`，
+ * 09-26 有了导出历史页之后，那样的记录只能显示「没有存逐行快照」
+ */
 async function seedExportRuns(projects: Map<string, { id: string; requirementIds: string[] }>) {
+  const sources = await loadDeclarationExportSources(prisma);
+  const titleSince = sources.profile.currentTitleSince;
+  const noOverride = { includeUnverified: false, includeMissingYear: false };
+
+  // 年初填上一年的绩效：只导了表
+  const perfYear = YEAR - 1;
+  const perfPackage = buildPerformancePackage(
+    filterForDeclaration(sources.items, perfYear, "performance", titleSince),
+    perfYear,
+  );
   await prisma.exportRun.create({
     data: {
-      kind: "PERF_DECLARATION",
-      year: YEAR - 1,
-      options: { year: YEAR - 1, includeUnverified: false },
-      includedCount: 14,
-      issueSummary: { unverified: 3, missingCategory: 1 },
-      snapshot: { note: "演示数据，快照略" },
+      ...buildExportRunData({
+        requestKey: "demo-perf-declaration",
+        kind: "performance",
+        year: perfYear,
+        options: noOverride,
+        issues: preflightDeclaration(sources.items, perfYear, "performance", titleSince)
+          .issues.filter((issue) => issue.scope === "included"),
+        groups: perfPackage.groups,
+        format: "xlsx",
+      }),
       createdAt: offsetDateTime(-205, 15),
+    },
+  });
+
+  // 为今年的职称申报攒材料：连同支撑材料打了包
+  const promotionPackage = withPromotionCaps(
+    buildPromotionPackage(
+      filterForDeclaration(sources.items, YEAR, "promotion", titleSince),
+      YEAR,
+      compareIndicatorCode,
+    ),
+    sources.capRules,
+  );
+  await prisma.exportRun.create({
+    data: {
+      ...buildExportRunData({
+        requestKey: "demo-promotion-declaration",
+        kind: "promotion",
+        year: YEAR,
+        options: noOverride,
+        issues: preflightDeclaration(sources.items, YEAR, "promotion", titleSince)
+          .issues.filter((issue) => issue.scope === "included"),
+        groups: promotionPackage.groups,
+        format: "zip",
+        materials: buildDeclarationMaterialPlan(promotionPackage, sources.materials).entries,
+      }),
+      createdAt: offsetDateTime(-12, 21),
     },
   });
   await prisma.exportRun.create({
@@ -2167,6 +2235,197 @@ async function seedExportRuns(projects: Map<string, { id: string; requirementIds
 }
 
 // ─── main ────────────────────────────────────────────────────────────
+
+/**
+ * 学业导师模块（mentor）。**默认关闭**，所以这里还要写一条 ModuleSetting——
+ * 否则演示库里点进 /mentees 只会看到「未启用」提示页。
+ *
+ * 人物全部虚构（open-source/README.md 的规矩），电话刻意不写成 11 位手机号：
+ * 开源导出的扫描器会把 `1[3-9]\d{9}` 当真号拦下来。
+ */
+async function seedMentees() {
+  await prisma.moduleSetting.upsert({
+    where: { key: "mentor" },
+    update: { enabled: true },
+    create: { key: "mentor", enabled: true },
+  });
+
+  const batch = await prisma.menteeBatch.create({
+    data: {
+      name: "2023 级数媒（首届带教）",
+      year: 2023,
+      note: "双选分来 6 人，明年春天进毕设",
+    },
+  });
+
+  const typeNames = ["见面", "学业指导", "毕设指导", "生涯规划"];
+  const types = new Map<string, string>();
+  for (const name of typeNames) {
+    const row = await prisma.menteeRecordType.create({ data: { name } });
+    types.set(name, row.id);
+  }
+
+  type MenteeSeed = {
+    name: string;
+    studentNo: string;
+    className: string;
+    phone?: string;
+    note?: string;
+    active?: boolean;
+  };
+  const people: MenteeSeed[] = [
+    { name: "林知远", studentNo: "2023010107", className: "数媒2301", phone: "0519-86660001", note: "想做非遗方向，作品集已有两件" },
+    { name: "苏明宇", studentNo: "2023010112", className: "数媒2301", note: "偏交互设计，准备专转本" },
+    { name: "周彦", studentNo: "2023010203", className: "数媒2302", phone: "0519-86660002" },
+    { name: "何思齐", studentNo: "2023010215", className: "数媒2302", note: "短视频剪辑强，话少" },
+    { name: "郑亦航", studentNo: "2023010228", className: "数媒2302" },
+    { name: "陆瑶", studentNo: "2023010104", className: "数媒2301", note: "已转专业，保留历史记录", active: false },
+  ];
+  const mentees = new Map<string, string>();
+  for (const person of people) {
+    const row = await prisma.mentee.create({
+      data: {
+        batchId: batch.id,
+        name: person.name,
+        studentNo: person.studentNo,
+        className: person.className,
+        phone: person.phone ?? null,
+        note: person.note ?? null,
+        active: person.active ?? true,
+      },
+    });
+    mentees.set(person.name, row.id);
+  }
+
+  type RecordSeed = { type: string; offset: number; content: string; members: string[] };
+  const records: RecordSeed[] = [
+    { type: "见面", offset: -96, content: "双选后第一次集体见面：讲了导师制怎么运转、每月至少见一次、有事随时找。", members: [] },
+    { type: "学业指导", offset: -74, content: "林知远专业课两门偏低，约定每两周交一次练习；提醒把创意编程的作业补齐。", members: ["林知远"] },
+    { type: "生涯规划", offset: -59, content: "苏明宇问专转本和就业怎么选。梳理了两条路的时间成本，让他先把作品集做厚。", members: ["苏明宇"] },
+    { type: "见面", offset: -41, content: "期中集体见面，收了一轮作品集进度。何思齐的短片素材够了，缺一条叙事线。", members: [] },
+    { type: "学业指导", offset: -27, content: "周彦、郑亦航一起看了实习岗位方向，建议先补一门三维软件。", members: ["周彦", "郑亦航"] },
+    { type: "毕设指导", offset: -12, content: "林知远初步选题：非遗纹样的 AI 生成工具。先读两篇综述，下次带需求清单来。", members: ["林知远"] },
+    { type: "毕设指导", offset: -3, content: "何思齐选题偏大，缩到“校园短片的分镜辅助工具”，范围清楚多了。", members: ["何思齐"] },
+  ];
+  for (const record of records) {
+    await prisma.menteeRecord.create({
+      data: {
+        batchId: batch.id,
+        typeId: types.get(record.type)!,
+        date: offsetDate(record.offset),
+        content: record.content,
+        members: {
+          create: record.members.map((name) => ({ menteeId: mentees.get(name)! })),
+        },
+      },
+    });
+  }
+
+  // ── M2：学生项目与关键节点 ──
+  // 与产品口径一致：建批次时补种 DEFAULT_MENTEE_PROJECT_KIND_NAMES。
+  // 演示库只用到前三个，第四个「实习项目」留着不建项目也无妨
+  const kinds = new Map<string, string>();
+  for (const [index, name] of ["毕业设计", "大创项目", "课程作品", "实习项目"].entries()) {
+    const row = await prisma.menteeProjectKind.create({
+      data: { name, sortOrder: index },
+    });
+    kinds.set(name, row.id);
+  }
+
+  type ProjectSeed = {
+    title: string;
+    kind: string;
+    schoolYear?: string;
+    outcomeText?: string;
+    members: string[];
+    /** [节点名, 相对今天的偏移天数 | null] */
+    milestones: Array<[string, number | null]>;
+    note?: string;
+  };
+  const projectSeeds: ProjectSeed[] = [
+    {
+      title: "基于 AI 的非遗纹样生成工具",
+      kind: "毕业设计",
+      schoolYear: "2025—2026 学年",
+      members: ["林知远"],
+      // 开题已过、中期将近、答辩还没定日子——三种状态同屏，好看排版
+      milestones: [["开题", -38], ["中期检查", 9], ["答辩", null]],
+      note: "题目偏大改过一次，现在聚焦在纹样生成",
+    },
+    {
+      title: "校园短片的分镜辅助工具",
+      kind: "毕业设计",
+      schoolYear: "2025—2026 学年",
+      members: ["何思齐"],
+      milestones: [["开题", -31], ["中期检查", 9]],
+    },
+    {
+      title: "本地生活服务 APP 交互改版",
+      kind: "课程作品",
+      schoolYear: "2025—2026 学年",
+      outcomeText: "入选院级优秀课程作品展",
+      members: ["苏明宇", "周彦"],
+      milestones: [["作品提交", -12]],
+    },
+    {
+      title: "面向社区的适老化数字服务调研",
+      kind: "大创项目",
+      schoolYear: "2025—2026 学年",
+      members: ["郑亦航", "何思齐"],
+      milestones: [["中期检查", 23]],
+    },
+  ];
+
+  let milestoneCount = 0;
+  for (const seed of projectSeeds) {
+    const project = await prisma.menteeProject.create({
+      data: {
+        batchId: batch.id,
+        title: seed.title,
+        kindId: kinds.get(seed.kind)!,
+        schoolYear: seed.schoolYear ?? null,
+        outcomeText: seed.outcomeText ?? null,
+        note: seed.note ?? null,
+        members: {
+          create: seed.members.map((name, index) => ({
+            menteeId: mentees.get(name)!,
+            orderIndex: index,
+          })),
+        },
+      },
+    });
+    for (const [label, offset] of seed.milestones) {
+      await prisma.menteeProjectMilestone.create({
+        data: {
+          projectId: project.id,
+          label,
+          date: offset == null ? null : offsetDate(offset),
+          note: offset == null ? "五月底，具体日子还没定" : null,
+        },
+      });
+      milestoneCount += 1;
+    }
+    // 毕设指导那两条记录挂到对应项目上，答辩季那张表才导得出内容
+    if (seed.kind === "毕业设计") {
+      await prisma.menteeRecord.updateMany({
+        where: {
+          batchId: batch.id,
+          typeId: types.get("毕设指导")!,
+          members: { some: { menteeId: mentees.get(seed.members[0])! } },
+        },
+        data: { projectId: project.id },
+      });
+    }
+  }
+
+  return {
+    menteeCount: people.length,
+    recordCount: records.length,
+    projectCount: projectSeeds.length,
+    milestoneCount,
+  };
+}
+
 
 async function main() {
   console.log("");
@@ -2196,6 +2455,7 @@ async function main() {
   await seedExportRuns(projects);
   const slotCount = await seedTimetable();
   const competitionCount = await seedCompetitions(teachers, achievements);
+  const mentor = await seedMentees();
 
   console.log("");
   console.log("  写入完成：");
@@ -2208,6 +2468,8 @@ async function main() {
   console.log(`    任务        ${tasks.length} 条 · 会议 ${meetings.length} 场 · 轮派 ${dutyCount} 条`);
   console.log(`    教师        ${teachers.size} 人 · 立项来源 ${sources.size} 家`);
   console.log(`    课表        ${slotCount} 段（今天在第 3 教学周）· 参赛记录 ${competitionCount} 条`);
+  console.log(`    导师学生    ${mentor.menteeCount} 人 · 指导记录 ${mentor.recordCount} 条`);
+  console.log(`    学生项目    ${mentor.projectCount} 个 · 关键节点 ${mentor.milestoneCount} 条`);
   if (demoUploadRoot) {
     console.log(`    实际落盘    ${writtenFileCount} 个 PDF → ${demoUploadRoot}`);
   }

@@ -393,7 +393,7 @@ export function TimetablePanel({
               )}
             >
               {semester.name}
-              <span className="tabular-nums opacity-70">{semester.count}</span>
+              <span className="tabular-nums">{semester.count}</span>
             </Link>
           ))}
           {selected && slots.length > 0 ? (

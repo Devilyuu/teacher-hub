@@ -8,6 +8,15 @@
 # "project name must not be empty"。
 name: keticompass
 
+# 容器日志上限。Docker 默认的 json-file 不轮转，日志文件一直涨到磁盘满为止（2026-09-25 评审）。
+# 每个容器最多 5 份 × 10MB。只挂在 app 和 caddy 上：postgres 的日志量很小，
+# 而改它的配置会让下次 `up -d app` 连带重建数据库容器、断一下库，不值得
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -37,6 +46,7 @@ services:
       context: .
     container_name: keticompass-app
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +55,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-keti}:${POSTGRES_PASSWORD:-keti_dev_pw}@postgres:5432/${POSTGRES_DB:-keticompass}?schema=public
       APP_PASSCODE: ${APP_PASSCODE:?请在 .env 里设置 APP_PASSCODE}
       APP_SESSION_SECRET: ${APP_SESSION_SECRET:?请在 .env 里设置 APP_SESSION_SECRET}
+      # 登录失败退避认哪个头当客户端地址。留空 = 默认的 X-Forwarded-For 最后一段，
+      # 宿主机 Nginx 和下面的 caddy 都对得上；取值见 .env.example
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
       AUDIO_TEMP_ROOT: /var/lib/teacher-desk-audio
       AUDIO_QUOTA_BYTES: ${AUDIO_QUOTA_BYTES:-2147483648}
       TRANSCRIPTION_LEASE_MINUTES: ${TRANSCRIPTION_LEASE_MINUTES:-30}
@@ -93,6 +106,7 @@ services:
     image: caddy:2-alpine
     container_name: keticompass-caddy
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       app:
         condition: service_healthy

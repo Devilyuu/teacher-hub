@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { Plus, Trash2 } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,8 @@ export type SemesterRowData = {
   hint: string;
   /** 正处于这个学期的教学周里 */
   current: boolean;
+  /** 挂在这个学期下的课表条目数。删学期会级联删掉它们，确认文案要写明 */
+  timetableCount: number;
 };
 
 function SubmitButton() {
@@ -70,21 +73,20 @@ export function SemesterPanel({ rows }: { rows: SemesterRowData[] }) {
                   开学 {row.startText}
                 </p>
               </div>
-              <form action={deleteSemester.bind(null, row.id)}>
-                <Button
-                  type="submit"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground hover:text-destructive"
-                  aria-label={`删除学期 ${row.name}`}
-                  onClick={(event) => {
-                    if (!confirm(`删除学期「${row.name}」？`))
-                      event.preventDefault();
-                  }}
-                >
-                  <Trash2 className="size-3.5" aria-hidden />
-                </Button>
-              </form>
+              {/* 硬删且级联删课表：文案必须把后果说出来（CLAUDE.md 删除模型） */}
+              <ConfirmSubmitButton
+                action={deleteSemester.bind(null, row.id)}
+                message={
+                  row.timetableCount > 0
+                    ? `删除学期「${row.name}」？会连同这学期的 ${row.timetableCount} 条课表一起删掉，找不回来。`
+                    : `删除学期「${row.name}」？删掉就没有了。`
+                }
+                size="icon-sm"
+                className="hover:text-destructive"
+                label={`删除学期 ${row.name}`}
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+              </ConfirmSubmitButton>
             </li>
           ))}
         </ul>

@@ -1,0 +1,7 @@
+[
+  { "name": "人才培养方案", "sortOrder": 10 },
+  { "name": "课程标准", "sortOrder": 20 },
+  { "name": "申报参考", "sortOrder": 30 },
+  { "name": "制度文件", "sortOrder": 40 },
+  { "name": "其他", "sortOrder": 50 }
+]

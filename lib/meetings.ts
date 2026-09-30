@@ -155,10 +155,60 @@ export function parseMeetingTime(value: string): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+/**
+ * 会还没开。详情页只对这种会给「加到日历」——开过的会加进去，两条提醒都已经错过了。
+ * `now` 做成参数：组件渲染里不许直接调 `Date.now()`（react-hooks/purity）
+ */
+export function isUpcomingMeeting(meetingTime: Date, now: Date = new Date()): boolean {
+  return meetingTime.getTime() > now.getTime();
+}
+
 /** 时间戳转回 datetime-local 的值，编辑表单要用 */
 export function toDatetimeLocal(value: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(
     value.getHours(),
   )}:${pad(value.getMinutes())}`;
+}
+
+/**
+ * 会议列表按「开没开」切成两段。
+ *
+ * **两段的排序方向相反，这才是分段的真正理由。** 库里统一按时间倒序取，
+ * 未来的会于是「最远的排最前」——下一场要开的反而沉在这一段的底部。
+ * 即将召开按**正序**（最近的在最上面，回答「下一场是哪个」），
+ * 已开过按**倒序**（刚开完的在最上面，回答「上次开的是哪个」）。
+ *
+ * `now` 做成参数，理由同 `isUpcomingMeeting`：组件渲染里不许直接调 `Date.now()`。
+ */
+export function splitMeetingsByTime<T extends { meetingTime: Date }>(
+  meetings: readonly T[],
+  now: Date = new Date(),
+): { upcoming: T[]; past: T[] } {
+  const upcoming: T[] = [];
+  const past: T[] = [];
+  for (const meeting of meetings) {
+    (isUpcomingMeeting(meeting.meetingTime, now) ? upcoming : past).push(meeting);
+  }
+  const byTime = (a: T, b: T) => a.meetingTime.getTime() - b.meetingTime.getTime();
+  upcoming.sort(byTime);
+  past.sort((a, b) => byTime(b, a));
+  return { upcoming, past };
+}
+
+/**
+ * 这场会还欠着事没办完。
+ *
+ * **调淡的判据是它，不是「开过了」。** 「N 条决议未转任务」那条提醒只会长在
+ * 开过的会上，而它正是这个模块最该喊的一句；按「开过就调淡」整行压暗，
+ * 等于把唯一要紧的提醒一起压暗了。所以：开过**且**决议都派下去了才调淡，
+ * 还欠着的照常是满对比度。
+ */
+export function isMeetingSettled(
+  meeting: { meetingTime: Date; pendingResolutions: number },
+  now: Date = new Date(),
+): boolean {
+  return (
+    !isUpcomingMeeting(meeting.meetingTime, now) && meeting.pendingResolutions === 0
+  );
 }

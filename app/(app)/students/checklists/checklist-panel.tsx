@@ -31,12 +31,12 @@ function SubmitButton() {
   );
 }
 
-function ChecklistItem({ row }: { row: ChecklistRow }) {
+function ChecklistItem({ row, classGroupId }: { row: ChecklistRow; classGroupId: string }) {
   const done = row.checkedCount >= row.activeCount && row.activeCount > 0;
   return (
     <li>
       <Link
-        href={`/students/checklists/${row.id}`}
+        href={`/students/checklists/${row.id}?class=${encodeURIComponent(classGroupId)}`}
         className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
       >
         <div className="min-w-0 flex-1">
@@ -134,7 +134,7 @@ export function ChecklistPanel({
           {open.length > 0 ? (
             <ul className="surface divide-y divide-border/50 overflow-hidden py-1">
               {open.map((row) => (
-                <ChecklistItem key={row.id} row={row} />
+                <ChecklistItem key={row.id} row={row} classGroupId={classGroupId} />
               ))}
             </ul>
           ) : null}
@@ -147,7 +147,7 @@ export function ChecklistPanel({
               </summary>
               <ul className="mt-2 divide-y divide-border/40">
                 {closed.map((row) => (
-                  <ChecklistItem key={row.id} row={row} />
+                  <ChecklistItem key={row.id} row={row} classGroupId={classGroupId} />
                 ))}
               </ul>
             </details>

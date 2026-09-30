@@ -177,8 +177,9 @@ async function main() {
         );
         assertExactFixtureSources(fixtureSources, ids);
 
+        const titleSince = sources.profile.currentTitleSince;
         const performance = buildPerformancePackage(
-          filterForDeclaration(fixtureSources, 2026, "performance", {
+          filterForDeclaration(fixtureSources, 2026, "performance", titleSince, {
             includeMissingYear: true,
             includeUnverified: true,
           }),
@@ -193,12 +194,14 @@ async function main() {
           "2026 绩效包仍纳入了学校已奖励的课题或成果",
         );
 
+        // 职称表按申报年度取任现职时间窗（算到申报年度上一年 12-31），
+        // 2026 年的临时课题和成果要按 2027 年申报才落在窗里
         const promotion = buildPromotionPackage(
-          filterForDeclaration(fixtureSources, 2026, "promotion", {
+          filterForDeclaration(fixtureSources, 2027, "promotion", titleSince, {
             includeMissingYear: true,
             includeUnverified: true,
           }),
-          2026,
+          2027,
           compareIndicatorCode,
         );
         const promotionRows = packageRows(promotion.groups);

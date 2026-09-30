@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
   personalScope: vi.fn(() => "personal-documents"),
   studentHonorScope: vi.fn((id: string) => `student-honors/${id}`),
   competitionEntryScope: vi.fn((id: string) => `competitions/${id}`),
+  menteeProjectScope: vi.fn((id: string) => `mentee-projects/${id}`),
   competitionEntryFindUnique: vi.fn(),
+  menteeProjectFindUnique: vi.fn(),
   saveUpload: vi.fn(),
   deleteUpload: vi.fn(),
   projectFindUnique: vi.fn(),
@@ -30,14 +32,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/server-auth", () => ({ requireSession: mocks.requireSession }));
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/storage", async () => ({
   MAX_UPLOAD_BYTES: 25 * 1024 * 1024,
+  // 纯函数、不碰磁盘，用真的：上传动作存进库的是它截过的名字
+  clampUploadFilename: (
+    await vi.importActual<typeof import("@/lib/storage")>("@/lib/storage")
+  ).clampUploadFilename,
   isAllowedUpload: mocks.isAllowedUpload,
   projectScope: mocks.projectScope,
   achievementScope: mocks.achievementScope,
   personalScope: mocks.personalScope,
   studentHonorScope: mocks.studentHonorScope,
   competitionEntryScope: mocks.competitionEntryScope,
+  menteeProjectScope: mocks.menteeProjectScope,
   saveUpload: mocks.saveUpload,
   deleteUpload: mocks.deleteUpload,
 }));
@@ -46,6 +53,7 @@ vi.mock("@/lib/db", () => ({
     project: { findUnique: mocks.projectFindUnique },
     achievement: { findUnique: mocks.achievementFindUnique },
     competitionEntry: { findUnique: mocks.competitionEntryFindUnique },
+    menteeProject: { findUnique: mocks.menteeProjectFindUnique },
     docCategory: {
       findUnique: mocks.docCategoryFindUnique,
       aggregate: mocks.docCategoryAggregate,
@@ -67,6 +75,7 @@ import {
   deletePersonalAttachment,
   uploadAchievementAttachment,
   uploadCompetitionAttachment,
+  uploadMenteeProjectAttachment,
   uploadPersonalAttachment,
   uploadProjectAttachment,
 } from "./attachment-actions";
@@ -119,6 +128,7 @@ function storedAttachment(
     docCategoryId: string | null;
     studentHonorId: string | null;
     competitionEntryId: string | null;
+    menteeProjectId: string | null;
     storagePath: string;
     filename: string;
   }> = {},
@@ -130,6 +140,7 @@ function storedAttachment(
     docCategoryId: "category-1",
     studentHonorId: null,
     competitionEntryId: null,
+    menteeProjectId: null,
     storagePath: "personal-documents/file.pdf",
     filename: "课程标准.pdf",
     ...overrides,
@@ -143,6 +154,7 @@ beforeEach(() => {
   mocks.projectFindUnique.mockResolvedValue({ id: "project-1" });
   mocks.achievementFindUnique.mockResolvedValue({ id: "achievement-1" });
   mocks.competitionEntryFindUnique.mockResolvedValue({ id: "entry-1" });
+  mocks.menteeProjectFindUnique.mockResolvedValue({ id: "mentee-project-1" });
   mocks.docCategoryFindUnique.mockResolvedValue({ id: "category-1", name: "课程标准" });
   mocks.docCategoryAggregate.mockResolvedValue({ _max: { sortOrder: 40 } });
   mocks.docCategoryCreate.mockResolvedValue({ id: "category-new" });
@@ -230,6 +242,7 @@ describe("uploadPersonalAttachment", () => {
         docCategoryId: "category-1",
         studentHonorId: null,
         competitionEntryId: null,
+        menteeProjectId: null,
         kind: "OTHER",
         filename: "课程标准.pdf",
         storagePath: "personal-documents/file.pdf",
@@ -410,6 +423,21 @@ describe("四种附件 owner 互斥", () => {
     expect(mocks.transactionActivityCreate).not.toHaveBeenCalled();
   });
 
+  // 下载时文件名进 Content-Disposition，太长会把响应头撑成 502（2026-09-14 审核报告）
+  it("超长的原始文件名进库前截短，扩展名留着", async () => {
+    const formData = pdfUploadForm({ kind: "OTHER" });
+    formData.set(
+      "file",
+      new File(["%PDF"], `${"很长的课题名".repeat(40)}.pdf`, { type: "application/pdf" }),
+    );
+
+    await uploadProjectAttachment("project-1", IDLE_FORM_STATE, formData);
+
+    const stored: string = mocks.attachmentCreate.mock.calls[0][0].data.filename;
+    expect(Array.from(stored)).toHaveLength(100);
+    expect(stored.endsWith("….pdf")).toBe(true);
+  });
+
   it("成果附件只写 achievementId，不放宽原有上传入口", async () => {
     await uploadAchievementAttachment(
       "achievement-1",
@@ -461,6 +489,7 @@ describe("四种附件 owner 互斥", () => {
     expect(mocks.competitionEntryScope).toHaveBeenCalledWith("entry-1");
     expect(mocks.personalScope).not.toHaveBeenCalled();
     expect(mocks.studentHonorScope).not.toHaveBeenCalled();
+    expect(mocks.menteeProjectScope).not.toHaveBeenCalled();
     expect(mocks.activityCreate).toHaveBeenCalledWith({
       data: {
         entityType: "CompetitionEntry",
@@ -469,6 +498,54 @@ describe("四种附件 owner 互斥", () => {
         detail: { filename: "课程标准.pdf", kind: "AWARD_CERTIFICATE", size: 4 },
       },
     });
+  });
+
+  // 同理：七种归属里任何一种漏了分支都不报错，只会把材料放错地方。
+  // 导师材料和参赛材料是两个模块，目录和审计实体都不能串
+  it("学生项目材料只写 menteeProjectId，且落在自己的目录和审计实体上", async () => {
+    await uploadMenteeProjectAttachment(
+      "mentee-project-1",
+      IDLE_FORM_STATE,
+      pdfUploadForm({ kind: "OTHER" }),
+    );
+
+    expect(mocks.attachmentCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: null,
+        achievementId: null,
+        docCategoryId: null,
+        studentHonorId: null,
+        competitionEntryId: null,
+        menteeProjectId: "mentee-project-1",
+      }),
+      select: { id: true },
+    });
+    expect(mocks.menteeProjectScope).toHaveBeenCalledWith("mentee-project-1");
+    expect(mocks.personalScope).not.toHaveBeenCalled();
+    expect(mocks.competitionEntryScope).not.toHaveBeenCalled();
+    expect(mocks.studentHonorScope).not.toHaveBeenCalled();
+    expect(mocks.activityCreate).toHaveBeenCalledWith({
+      data: {
+        entityType: "MenteeProject",
+        entityId: "mentee-project-1",
+        action: "上传附件",
+        detail: { filename: "课程标准.pdf", kind: "OTHER", size: 4 },
+      },
+    });
+  });
+
+  // 界面下拉按归属收窄了，服务端也得按同一份名单复核（lib/attachment-kinds.ts），
+  // 否则就是「界面藏起来、服务端照收」
+  it.each([
+    ["学生项目", () => uploadMenteeProjectAttachment("mentee-project-1", IDLE_FORM_STATE, pdfUploadForm({ kind: "PROPOSAL" }))],
+    ["参赛记录", () => uploadCompetitionAttachment("entry-1", IDLE_FORM_STATE, pdfUploadForm({ kind: "PUBLICATION" }))],
+  ])("%s不收名单外的类型：标红类型字段，不落盘不建记录", async (_label, upload) => {
+    const state = await upload();
+
+    expect(state.ok).toBe(false);
+    expect(state.fieldErrors?.kind).toEqual(["这里不收这个类型"]);
+    expect(mocks.saveUpload).not.toHaveBeenCalled();
+    expect(mocks.attachmentCreate).not.toHaveBeenCalled();
   });
 });
 

@@ -11,6 +11,7 @@ import {
   chooseE2eFinalOutcome,
   containerLabelsMatch,
   countExactCellMatches,
+  isDotenvTemplateName,
   extractRunnerCleanupLabels,
   quoteDatabaseIdentifier,
   runCleanupSteps,
@@ -113,7 +114,26 @@ describe("E2E runner safety helpers", () => {
     expect(() => assertNoLoadableDotenvFiles([file(".env.production"), file(".env.example")])).toThrow(/\.env\.production/);
   });
 
-  it("only allows an ordinary lowercase .env.example file", () => {
+  // `.env.demo.example` is tracked since 2026-08-30; rejecting it failed every CI E2E run
+  // before the first test for four weeks.
+  it("allows tracked templates such as .env.demo.example, but never the real demo env", () => {
+    const file = (name) => ({ name, isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false });
+    expect(() => assertNoLoadableDotenvFiles([file(".env.example"), file(".env.demo.example")])).not.toThrow();
+    expect(() => assertNoLoadableDotenvFiles([file(".env.demo")])).toThrow(/\.env\.demo/);
+    expect(() => assertNoLoadableDotenvFiles([file(".env.example.local")])).toThrow(/\.env\.example\.local/);
+    expect(() => assertNoLoadableDotenvFiles([file(".env.local.example"), file(".env")])).toThrow(/: \.env$/);
+  });
+
+  it("recognizes only exact lowercase dotenv template names", () => {
+    expect(isDotenvTemplateName(".env.example")).toBe(true);
+    expect(isDotenvTemplateName(".env.demo.example")).toBe(true);
+    expect(isDotenvTemplateName(".env.Demo.example")).toBe(false);
+    expect(isDotenvTemplateName(".env.demo.example.bak")).toBe(false);
+    expect(isDotenvTemplateName(".envexample")).toBe(false);
+    expect(isDotenvTemplateName(".env..example")).toBe(false);
+  });
+
+  it("only allows ordinary lowercase template files", () => {
     const entry = (name, kind) => ({
       name,
       isFile: () => kind === "file",
@@ -123,6 +143,7 @@ describe("E2E runner safety helpers", () => {
     expect(() => assertNoLoadableDotenvFiles([entry(".ENV.EXAMPLE", "file")])).toThrow();
     expect(() => assertNoLoadableDotenvFiles([entry(".env.example", "directory")])).toThrow();
     expect(() => assertNoLoadableDotenvFiles([entry(".env.example", "symlink")])).toThrow();
+    expect(() => assertNoLoadableDotenvFiles([entry(".env.demo.example", "symlink")])).toThrow();
   });
 
   it("requires both cleanup labels to match before removing a container", () => {

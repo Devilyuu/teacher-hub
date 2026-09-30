@@ -251,6 +251,23 @@ describe("parseOutcomeQuery", () => {
 
     expect(outcomeHrefWith(state, { scope: null })).toBe("/achievements?type=PAPER");
   });
+
+  it("groups by default; group=none is a layout choice, not a filter", () => {
+    const grouped = parseOutcomeQuery({ group: "whatever" }, context);
+    expect(grouped.grouped).toBe(true);
+    expect(grouped.canonicalPath).toBe("/achievements");
+
+    const flat = parseOutcomeQuery({ scope: "all", group: "none" }, context);
+    expect(flat.grouped).toBe(false);
+    // 不算筛选：「清除筛选」不该出现，也不该被它带走
+    expect(flat.anyFilter).toBe(false);
+    expect(flat.canonicalPath).toBe("/achievements?scope=all&group=none");
+    // 换年度、换口径时排布方式跟着走
+    expect(outcomeHrefWith(flat, { year: "2026" })).toBe(
+      "/achievements?scope=all&year=2026&group=none",
+    );
+    expect(outcomeHrefWith(flat, { group: null })).toBe("/achievements?scope=all");
+  });
 });
 
 describe("outcomeHrefWith", () => {

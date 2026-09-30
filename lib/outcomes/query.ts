@@ -1,5 +1,10 @@
 import { AchievementUsage } from "@/lib/generated/prisma/enums";
 import {
+  defaultPromotionDeclareYear,
+  parsePromotionDeclareYear,
+  promotionDeclareYearOptions,
+} from "@/lib/promotion";
+import {
   isOutcomeTypeFilter,
   type LedgerScope,
   type OutcomeFilters,
@@ -22,7 +27,8 @@ export type OutcomeQueryKey =
   | "usage"
   | "needslink"
   | "unverified"
-  | "dyear";
+  | "dyear"
+  | "group";
 
 export type OutcomeQueryPatch = Partial<
   Record<OutcomeQueryKey, string | null>
@@ -49,6 +55,11 @@ export type OutcomeQueryState = {
   yearParam: string | null;
   declareYear: number;
   declareYearOptions: readonly number[];
+  /**
+   * 列表要不要按分类分组。**不是筛选**——不进 `anyFilter`、不被「清除筛选」带走，
+   * 它只决定同一批行怎么排布。默认分组，`group=none` 才平铺
+   */
+  grouped: boolean;
   anyFilter: boolean;
   canonicalParams: URLSearchParams;
   canonicalPath: string;
@@ -109,12 +120,9 @@ export function parseOutcomeQuery(
   context: { currentYear?: number } = {},
 ): OutcomeQueryState {
   const currentYear = context.currentYear ?? new Date().getFullYear();
-  const declareYearOptions = [
-    currentYear,
-    currentYear + 1,
-    currentYear + 2,
-  ] as const;
-  const defaultDeclareYear = currentYear + 1;
+  // 和导出页的职称表共用一份（lib/promotion.ts），两处默认值必须一样
+  const declareYearOptions = promotionDeclareYearOptions(currentYear);
+  const defaultDeclareYear = defaultPromotionDeclareYear(currentYear);
 
   const scope = parseScope(scalar(params, "scope"));
   const type = parseOutcomeType(scalar(params, "type"));
@@ -132,10 +140,8 @@ export function parseOutcomeQuery(
   const usage = parseUsage(scalar(params, "usage"));
   const needsLinkOnly = scalar(params, "needslink") === "1";
   const unverifiedOnly = scalar(params, "unverified") === "1";
-  const rawDeclareYear = scalar(params, "dyear");
-  const declareYear =
-    declareYearOptions.find((value) => String(value) === rawDeclareYear) ??
-    defaultDeclareYear;
+  const declareYear = parsePromotionDeclareYear(scalar(params, "dyear"), currentYear);
+  const grouped = scalar(params, "group") !== "none";
 
   const filters: OutcomeQueryFilters = {
     scope,
@@ -163,6 +169,7 @@ export function parseOutcomeQuery(
   if (declareYear !== defaultDeclareYear) {
     canonicalParams.set("dyear", String(declareYear));
   }
+  if (!grouped) canonicalParams.set("group", "none");
 
   const search = canonicalParams.toString();
   return {
@@ -170,6 +177,7 @@ export function parseOutcomeQuery(
     yearParam: year == null ? null : String(year),
     declareYear,
     declareYearOptions,
+    grouped,
     anyFilter: Boolean(
       type ||
         year != null ||

@@ -1,0 +1,22 @@
+# cron 写的两份日志：每日备份、每 10 分钟一次的转写维护。
+# 原来只追加不轮转（2026-09-25 评审），维护日志两个月就涨到 1.3MB，一直涨下去迟早占满磁盘。
+#
+# 装法（docs/deploy.md「日志轮转」）：
+#   sudo install -m 644 deploy/logrotate/keticompass /etc/logrotate.d/keticompass
+#   sudo logrotate -d /etc/logrotate.d/keticompass   # 试运行，只打印不动文件
+#
+# - su root syslog：Ubuntu 的 /var/log 是 root:syslog 775，不写这行 logrotate 会以
+#   「父目录权限不安全」为由整段跳过，而且只在它自己的日志里说一句
+# - copytruncate：两份日志是 cron 用 >> 追加的，没有进程握着文件句柄要通知，
+#   截断原文件最省事；轮转瞬间正好写进来的那几行可能丢，可以接受
+# - 保留 8 周、压缩：出过什么事往回翻两个月够用
+/var/log/keticompass-backup.log /var/log/keticompass-maintenance.log {
+    su root syslog
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RulesNotImported } from "@/components/rules-not-imported";
 import { IDLE_FORM_STATE, type FormState, formMessageClass } from "@/lib/form-state";
 import { promotionOptionLabel, type PromotionOption } from "@/lib/promotion";
 import {
@@ -50,10 +51,87 @@ export type ProjectFormDefaults = {
   endDate?: Date | null;
   closingDeadline?: Date | null;
   promotionCategoryId?: string | null;
+  /** 已挂那一格的名字，它不在候选里时下拉照写它并保持不动 */
+  promotionLabel?: string | null;
   promotionScore?: number | null;
   researchContent?: string | null;
   note?: string | null;
 };
+
+const PROMOTION_SELECT_CLASS =
+  "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+
+/**
+ * 课题挂的职称指标 + 分。选中哪一格，就把那一格的赋分原文和上限摆在分值框下面——
+ * 原来这里写死着本校「5.2 国家级 6 / 省级 4 / 市级 2」，换一所学校就是错的。
+ * 规则原文**照原样显示、不解析**，分由人填（第 1 条）。
+ *
+ * 候选是分类表里勾了「课题可挂」的那几项，一项都没勾时是全部（projectIndicatorOptions）。
+ * 已挂的那一格不在候选里时补一项「保持不动」，否则一保存就被清空。
+ */
+function ProjectPromotionFields({
+  options,
+  defaults,
+  scoreErrors,
+}: {
+  options: PromotionOption[];
+  defaults?: ProjectFormDefaults;
+  scoreErrors?: string[];
+}) {
+  const initial = defaults?.promotionCategoryId ?? "";
+  const [selectedId, setSelectedId] = useState(initial);
+  const keepsCurrent = initial !== "" && !options.some((option) => option.id === initial);
+  const selected = options.find((option) => option.id === selectedId);
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label htmlFor="promotionCategoryId">职称指标</Label>
+        <select
+          id="promotionCategoryId"
+          name="promotionCategoryId"
+          value={selectedId}
+          onChange={(event) => setSelectedId(event.target.value)}
+          className={PROMOTION_SELECT_CLASS}
+        >
+          <option value="">不计入职称</option>
+          {keepsCurrent ? (
+            <option value={initial}>
+              {defaults?.promotionLabel ?? "原来挂的指标"}（不在当前候选里，保持不动）
+            </option>
+          ) : null}
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {promotionOptionLabel(option)}
+            </option>
+          ))}
+        </select>
+        {/* 不按纵向/横向自动选：那就是第 11 条禁止的映射函数，
+          人事处哪年把这两格合并或拆细，自动匹配就开始骗人 */}
+        <p className="text-xs text-muted-foreground">
+          一个课题只占一行，按所选指标的规则赋分。选哪一格由你定，系统不按纵横向替你猜
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <TextField
+          name="promotionScore"
+          label="职称量化分"
+          type="number"
+          step="0.1"
+          defaultValue={defaults?.promotionScore?.toString()}
+          hint="人工填，对照下面的赋分原文"
+          errors={scoreErrors}
+        />
+        {selected && (selected.scoringRule || selected.cap != null) ? (
+          <div className="rounded-xl bg-well px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            {selected.scoringRule ? <p className="whitespace-pre-wrap">{selected.scoringRule}</p> : null}
+            {selected.cap != null ? <p>本栏上限 {selected.cap} 分</p> : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export function ProjectForm({
   action,
@@ -70,7 +148,7 @@ export function ProjectForm({
   dataVersion?: string;
   /** 已登记的来源单位。选不到时可以现场新增 */
   sources: ProjectSourceOption[];
-  /** 课题能挂的职称指标，已由调用方筛成 5.2 / 5.3 两项 */
+  /** 课题能挂的职称指标，已由调用方筛好（projectIndicatorOptions：勾了「课题可挂」的，一项没勾时是全部） */
   projectPromotionOptions: PromotionOption[];
 }) {
   const [state, formAction] = useActionState(action, IDLE_FORM_STATE);
@@ -287,45 +365,14 @@ export function ProjectForm({
           </h2>
 
           {projectPromotionOptions.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="promotionCategoryId">人事处指标</Label>
-                <select
-                  id="promotionCategoryId"
-                  name="promotionCategoryId"
-                  defaultValue={defaults?.promotionCategoryId ?? ""}
-                  className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                  <option value="">不计入职称</option>
-                  {projectPromotionOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {promotionOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
-                {/* 不按纵向/横向自动选：那就是第 11 条禁止的映射函数，
-                  人事处哪年把这两格合并或拆细，自动匹配就开始骗人 */}
-                <p className="text-xs text-muted-foreground">
-                  一个课题只占一行——5.2 是「每项加 N 分」，按项赋分，
-                  不是立项算一次、结题再算一次。选哪一格由你定，系统不按纵横向替你猜
-                </p>
-              </div>
-              <TextField
-                name="promotionScore"
-                label="职称量化分"
-                type="number"
-                step="0.1"
-                defaultValue={defaults?.promotionScore?.toString()}
-                hint="人工填。5.2 国家级 6 / 省级 4 / 市级 2，本栏上限 10 分"
-                errors={errorsOf("promotionScore")}
-              />
-            </div>
+            <ProjectPromotionFields
+              options={projectPromotionOptions}
+              defaults={defaults}
+              scoreErrors={errorsOf("promotionScore")}
+            />
           ) : (
             <>
-              <p className="text-xs text-muted-foreground">
-                还没导入人事处的职称量化表，跑一次{" "}
-                <code>npm run import:promotion-rules</code> 后这里才有选项。
-              </p>
+              <RulesNotImported table="promotion" />
               <input
                 type="hidden"
                 name="promotionCategoryId"

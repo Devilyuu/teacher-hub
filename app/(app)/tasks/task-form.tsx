@@ -128,22 +128,38 @@ export function TaskForm({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="relatedProjectId">关联课题</Label>
-        {/* 外键不是自由文本：能点进课题、能按课题聚合待办（prd-routines 2） */}
-        <select
-          id="relatedProjectId"
-          name="relatedProjectId"
-          defaultValue={task?.relatedProject?.id ?? ""}
-          className={selectClass}
-        >
-          <option value="">不关联</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.shortTitle ?? project.title}
-            </option>
-          ))}
-        </select>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="relatedProjectId">关联课题</Label>
+          {/* 外键不是自由文本：能点进课题、能按课题聚合待办（prd-routines 2） */}
+          <select
+            id="relatedProjectId"
+            name="relatedProjectId"
+            defaultValue={task?.relatedProject?.id ?? ""}
+            className={selectClass}
+          >
+            <option value="">不关联</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.shortTitle ?? project.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="assignee">负责人</Label>
+          {/* 不是任务指派——只是记一下在等谁。填了别人，这条就进首页右栏的「等别人」 */}
+          <Input
+            id="assignee"
+            name="assignee"
+            defaultValue={task?.assignee ?? ""}
+            placeholder="留空就是我"
+          />
+          <p className="text-xs text-muted-foreground">
+            填别人的名字，这条会出现在首页「等别人」里，提醒你去催
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

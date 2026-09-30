@@ -17,13 +17,8 @@ export const PROJECT_PERFORMANCE_EVENT_LABELS: Record<
   OTHER: "其他",
 };
 
-/** 课题绩效分类的候选项。只缩小下拉范围，不替用户选择。 */
-export const PROJECT_PERF_MINORS = [
-  "纵向课题（教科研）",
-  "横向课题及项目",
-  "科技成果转化",
-  "培训项目申报与到账",
-] as const;
+// 课题绩效分类的候选：原来是这里写死的四个小类名，2026-09-27 改成分类表上的「课题可挂」标记
+// （PerfCategory.projectEligible，迁移照这四个名字勾好了），口径在 lib/project-eligibility.ts。
 
 export type ProjectPerformanceSource = {
   title: string;

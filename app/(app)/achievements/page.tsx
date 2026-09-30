@@ -1,7 +1,10 @@
+import { Fragment } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { AchievementTabs } from "@/components/achievement-tabs";
+import { FilterChip } from "@/components/filter-chip";
+import { VerifyProgressBar } from "@/components/verify-progress-bar";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -10,8 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDateOnly } from "@/lib/date";
-import { ACHIEVEMENT_USAGE_LABELS, OUTCOME_TYPE_LABELS } from "@/lib/labels";
+import { formatDateOnly, todayAsDateOnly } from "@/lib/date";
+import { verifyProgress } from "@/lib/export/preflight";
+import { loadDeclarationExportSources } from "@/lib/export/sources";
+import {
+  ACHIEVEMENT_USAGE_LABELS,
+  OUTCOME_TYPE_LABELS,
+  PROJECT_STATUS_LABELS,
+} from "@/lib/labels";
 import {
   missingYearCount,
   outcomeScopeCounts,
@@ -19,6 +28,8 @@ import {
   performanceMinorFacets,
   promotionMajorFacets,
   promotionMinorFacets,
+  projectsWithoutPerformanceEntries,
+  promotionCapsOf,
   promotionScoreComposition,
   scoreWithoutPromotionCategoryCount,
   typeFacets,
@@ -32,6 +43,12 @@ import {
   outcomeTotals,
 } from "@/lib/outcomes/filters";
 import {
+  groupOutcomes,
+  outcomeGroupDimension,
+  outcomeGroupOrderFrom,
+} from "@/lib/outcomes/grouping";
+import { outcomeProjectHref } from "@/lib/outcomes/links";
+import {
   outcomeHrefWith,
   parseOutcomeQuery,
   shouldRenderMissingYearFacet,
@@ -42,12 +59,16 @@ import { promotionWindow } from "@/lib/promotion";
 import { getPerfOptions } from "@/lib/queries/perf-categories";
 import {
   getCurrentTitleSince,
+  getPromotionCapRules,
   getPromotionMajorOrder,
   getPromotionOptions,
 } from "@/lib/queries/promotion-categories";
 import { getUnifiedOutcomeList } from "@/lib/queries/outcomes";
 import { outcomePanelData } from "@/lib/outcomes/view-model";
-import { cn } from "@/lib/utils";
+import {
+  OutcomeGroupHeaderItem,
+  OutcomeGroupHeaderRow,
+} from "./outcome-group-header";
 import { OutcomeInspector } from "./outcome-inspector";
 import { OutcomeRow } from "./outcome-row";
 import { OutcomeSummaryItem } from "./outcome-summary-item";
@@ -57,36 +78,8 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "成果" };
 
-function FilterChip({
-  active,
-  href,
-  children,
-}: {
-  active: boolean;
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-current={active ? "true" : undefined}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs whitespace-nowrap transition-colors",
-        // 未选中走中间调而不是白底加阴影：这块筛选区有四十多个胶囊，
-        // 个个浮起来时比下面的数据还重。well 让它们沉进卡片里，
-        // 只有选中的那颗墨色胶囊立起来
-        active
-          ? "bg-primary font-medium text-primary-foreground"
-          : "bg-well text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      {children}
-    </Link>
-  );
-}
-
 function Count({ n }: { n: number }) {
-  return <span className="tabular-nums opacity-70">{n}</span>;
+  return <span className="tabular-nums">{n}</span>;
 }
 
 function SubFacetRow({
@@ -130,14 +123,25 @@ export default async function AchievementsPage({
   searchParams: Promise<OutcomeSearchParams>;
 }) {
   const queryState = parseOutcomeQuery(await searchParams);
-  const [all, promotionOptions, perfOptions, titleSince, promotionMajorOrder] =
-    await Promise.all([
-      getUnifiedOutcomeList(),
-      getPromotionOptions(),
-      getPerfOptions(),
-      getCurrentTitleSince(),
-      getPromotionMajorOrder(),
-    ]);
+  const [
+    all,
+    promotionOptions,
+    perfOptions,
+    titleSince,
+    promotionMajorOrder,
+    declarationSources,
+    capRules,
+  ] = await Promise.all([
+    getUnifiedOutcomeList(),
+    getPromotionOptions(),
+    getPerfOptions(),
+    getCurrentTitleSince(),
+    getPromotionMajorOrder(),
+    // 核实进度只在「待核实」视图画，那份数据（导出页同一份）也只在那时取
+    queryState.filters.unverifiedOnly ? loadDeclarationExportSources() : null,
+    // 封顶后合计只在职称口径下写
+    queryState.filters.scope === "promotion" ? getPromotionCapRules() : [],
+  ]);
 
   const declareYear = queryState.declareYear;
   const window = promotionWindow(titleSince, declareYear);
@@ -151,6 +155,14 @@ export default async function AchievementsPage({
     outcomeHrefWith(queryState, patch);
 
   const filtered = filterOutcomes(all, filters);
+
+  // 核实进度：口径和导出预检是同一套（verifyProgress）。筛了年度就看那一年——
+  // 年初核上一年的绩效时正好用得上；没筛就看今年
+  const progressYear =
+    typeof filters.year === "number" ? filters.year : todayAsDateOnly().getUTCFullYear();
+  const progress = declarationSources
+    ? verifyProgress(declarationSources.items, progressYear)
+    : null;
   const scopeCounts = outcomeScopeCounts(all, window);
   const inScopeCount = scopeCounts[scope];
   // 年度要进分面上下文：选了 2026 之后，绩效大类/职称指标/用途都只数 2026 的。
@@ -181,6 +193,7 @@ export default async function AchievementsPage({
   const usages = usageFacets(all, facetContext);
   const totals = outcomeTotals(all, filters);
   const scoreOnly = scoreWithoutPromotionCategoryCount(all);
+  const unregisteredProjects = projectsWithoutPerformanceEntries(all);
   // 和上面口径 chip 的 patch 保持一致：切口径时坐标筛选一起清，
   // 否则带着职称一级指标切到「全部」，列表会莫名其妙是空的
   const outOfScopeHref = hrefWith({
@@ -315,25 +328,53 @@ export default async function AchievementsPage({
 
   // 面板数据在服务端一次算好。**不额外查库**——用的就是列表这份 `filtered`，
   // 面板只是把同一条记录换个排布（见 outcome-inspector.tsx 文件头）
+  const rowFilters = {
+    year: filters.year,
+    major: filters.major,
+    minor: filters.minor,
+    unverifiedOnly: filters.unverifiedOnly,
+  };
   const rowViewOptions = {
     scope,
     currentOutcomePath: outcomePath,
-    filters: {
-      year: filters.year,
-      major: filters.major,
-      minor: filters.minor,
-      unverifiedOnly: filters.unverifiedOnly,
-    },
+    filters: rowFilters,
   };
+  // 面板按 row.key 编址，**不传 entryGroup**：分组只是列表的排布，
+  // 面板看的是整条记录（一个跨两类的课题，面板里两条事项都该在）
   const panels = Object.fromEntries(
     filtered.map((row) => [row.key, outcomePanelData(row, rowViewOptions)]),
   );
+
+  // ── 分组 ────────────────────────────────────────────────────────────
+  // 「全部 + 2026」一选就是几十行平铺，得一行行读「绩效分类」那列才知道哪几条是一类。
+  // 分组**不筛掉任何一行、不改任何数**，各组小计加起来等于上面那条合计（grouping.test.ts 锁着）。
+  // 顺序取自学校那两张表的行序，不按条数排——条数排序会让同一个组每换个年度就跳位。
+  const groupOrder = outcomeGroupOrderFrom(perfOptions, promotionMajorOrder);
+  const groups = queryState.grouped
+    ? groupOutcomes(filtered, filters, groupOrder)
+    : null;
+  // 不分组时走同一套渲染，省得两份 JSX 各写一遍早晚长歪
+  const flatGroup = {
+    key: "__flat__",
+    label: "",
+    rows: filtered,
+    score: 0,
+    entryGroup: null,
+  };
+  const scoreLabel = isPromotion ? "职称分" : "申报分";
+  // 小类已经选定时 groupOutcomes 返回 null（只会分出一个组，白占一行）
+  const canGroup = outcomeGroupDimension(filters) != null;
 
   // 堆叠条吃的是 filtered——必须和合计、表格说同一份数（facets.ts 注释）。
   // 只在职称口径下画：它按一级指标拆分，别的口径里这个维度不是主角
   const scoreComposition = isPromotion
     ? promotionScoreComposition(filtered, promotionMajorOrder)
     : null;
+  // 按量化表封顶截一遍（和导出职称表同一个函数）。没截掉任何分时不写，免得多一个一样的数
+  const promotionCaps =
+    isPromotion && capRules.length > 0 ? promotionCapsOf(filtered, capRules) : null;
+  const capped =
+    promotionCaps && promotionCaps.overCap.length > 0 ? promotionCaps : null;
 
   const totalsLine = (
     <div className="space-y-2.5">
@@ -351,6 +392,14 @@ export default async function AchievementsPage({
             {totals.sumPromotionScore}
           </span>
         </span>
+        {capped ? (
+          <span>
+            封顶后{" "}
+            <span className="font-medium tabular-nums text-foreground">
+              {capped.cappedTotal}
+            </span>
+          </span>
+        ) : null}
         <span>
           申报分合计{" "}
           <span className="font-medium tabular-nums text-foreground">
@@ -365,6 +414,16 @@ export default async function AchievementsPage({
             清除筛选
           </Link>
         ) : null}
+        {/* 排布开关。**不是筛选**——所以它挨着合计而不是混进上面那片筛选胶囊里，
+            也不被「清除筛选」带走（query.ts 的 grouped） */}
+        {canGroup ? (
+          <Link
+            href={hrefWith({ group: queryState.grouped ? "none" : null })}
+            className="ml-auto underline-offset-4 hover:underline"
+          >
+            {queryState.grouped ? "不分组" : "按分类分组"}
+          </Link>
+        ) : null}
       </div>
       {scoreComposition ? (
         <PromotionScoreBar
@@ -372,12 +431,31 @@ export default async function AchievementsPage({
           deducted={scoreComposition.deducted}
         />
       ) : null}
+      {/* 写成字不放 title：手机上点不出悬停提示（月历那条的同一个理由） */}
+      {capped ? (
+        <p className="measure text-xs leading-relaxed text-muted-foreground">
+          超出量化表上限的部分不计入：
+          {capped.overCap
+            .map((over) => `${over.label} 合计 ${over.raw} 分、上限 ${over.cap} 分`)
+            .join("；")}
+          。
+        </p>
+      ) : null}
     </div>
   );
 
   return (
     <div className="space-y-4">
       <AchievementTabs />
+
+      {progress ? (
+        <VerifyProgressBar
+          progress={progress}
+          focusYearHref={
+            filters.year === progressYear ? null : hrefWith({ year: String(progressYear) })
+          }
+        />
+      ) : null}
 
       <header className="flex flex-wrap items-end justify-between gap-4 pt-2">
         <div className="space-y-2">
@@ -501,7 +579,7 @@ export default async function AchievementsPage({
               />
               <span className="group-open:hidden">更多筛选</span>
               <span className="hidden group-open:inline">收起筛选</span>
-              <span className="text-muted-foreground/70">
+              <span className="text-muted-foreground">
                 {showPerformanceFacets ? "类型 · 绩效分类 · 用途" : "类型 · 职称指标 · 用途"}
               </span>
               {hiddenActive.length > 0 ? (
@@ -653,7 +731,7 @@ export default async function AchievementsPage({
           {window.from
             ? `自 ${formatDateOnly(window.from)} 起`
             : "（档案未填任现职日期，只卡上限）"}
-          算到 {window.toYear}-12-31 为止（按 {declareYear} 年申报算）。{" "}
+          算到 {window.toYear}-12-31 为止（按 {declareYear} 年申报算）。
           {/* **这句必须带数字和链接。** 新建的课题和刚引用的成果都还没挂职称指标，
               在默认口径下一条也看不见——只说规则不说「还有多少条没显示」，
               用户会以为刚建的东西没存上 */}
@@ -677,6 +755,44 @@ export default async function AchievementsPage({
         </p>
       ) : null}
 
+      {/* 绩效口径的同一个坑：课题只有登记了绩效事项才在这里出现，而「申报了没中
+          也有基本分」这件事系统不替人登记（第 1 条铁律）。不报数的话，用户看到的是
+          「我申报过的课题在成果页里找不到」，而不是「还差一步登记」。
+          **不跟年度筛选走**——「哪一年该有哪一条」得靠日期猜，这里只报从没登记过的 */}
+      {scope === "performance" && unregisteredProjects.length > 0 ? (
+        <details className="group px-1 text-xs text-muted-foreground">
+          <summary className="measure cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            绩效口径下，课题要在详情页登记了「课题绩效事项」才会出现——申报（没中也算）、
+            立项、到账、结题各登记一条。另有{" "}
+            <span className="tabular-nums">{unregisteredProjects.length}</span>{" "}
+            个课题一条都没登记过，
+            <span className="text-foreground underline underline-offset-4">
+              <span className="group-open:hidden">展开名单</span>
+              <span className="hidden group-open:inline">收起名单</span>
+            </span>
+            。
+          </summary>
+          <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            {unregisteredProjects.map((row) => (
+              <li key={row.key} className="flex min-w-0 items-baseline gap-2">
+                {/* 带 returnTo：登记完点返回键要回到这份绩效口径的列表确认它出现了，
+                    和本页其余课题链接同一个规矩（lib/outcomes/links.ts） */}
+                <Link
+                  href={`${outcomeProjectHref(row.id, outcomePath)}#performance`}
+                  title={row.title}
+                  className="min-w-0 truncate text-foreground underline-offset-4 hover:underline"
+                >
+                  {row.title}
+                </Link>
+                <span className="shrink-0">
+                  {PROJECT_STATUS_LABELS[row.projectStatus]}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       {filtered.length === 0 ? (
         <div className="surface p-14 text-center">
           <p className="text-muted-foreground">
@@ -698,19 +814,28 @@ export default async function AchievementsPage({
               **两份都渲染、用 CSS 切**，不按 UA 判断：服务端组件拿不到视口宽度，
               猜错了用户就看到另一套；平板横竖屏一转也得跟着变 */}
           <ul className="surface divide-y divide-border/60 overflow-hidden md:hidden">
-            {filtered.map((row) => (
-              <OutcomeSummaryItem
-                key={row.key}
-                row={row}
-                scope={scope}
-                currentOutcomePath={outcomePath}
-                filters={{
-                  year: filters.year,
-                  major: filters.major,
-                  minor: filters.minor,
-                  unverifiedOnly: filters.unverifiedOnly,
-                }}
-              />
+            {(groups ?? [flatGroup]).map((group, index) => (
+              <Fragment key={group.key}>
+                {groups ? (
+                  <OutcomeGroupHeaderItem
+                    label={group.label}
+                    count={group.rows.length}
+                    score={group.score}
+                    scoreLabel={scoreLabel}
+                    first={index === 0}
+                  />
+                ) : null}
+                {group.rows.map((row) => (
+                  <OutcomeSummaryItem
+                    key={`${group.key}:${row.key}`}
+                    row={row}
+                    scope={scope}
+                    currentOutcomePath={outcomePath}
+                    filters={rowFilters}
+                    entryGroup={group.entryGroup}
+                  />
+                ))}
+              </Fragment>
             ))}
           </ul>
         <OutcomeInspector panels={panels}>
@@ -748,21 +873,30 @@ export default async function AchievementsPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((row) => (
-                  <OutcomeRow
-                    key={row.key}
-                    row={row}
-                    scope={scope}
-                    currentOutcomePath={outcomePath}
-                    filters={{
-                      year: filters.year,
-                      major: filters.major,
-                      minor: filters.minor,
-                      unverifiedOnly: filters.unverifiedOnly,
-                    }}
-                    promotionOptions={promotionOptions}
-                    perfOptions={perfOptions}
-                  />
+                {(groups ?? [flatGroup]).map((group, index) => (
+                  <Fragment key={group.key}>
+                    {groups ? (
+                      <OutcomeGroupHeaderRow
+                        label={group.label}
+                        count={group.rows.length}
+                        score={group.score}
+                        scoreLabel={scoreLabel}
+                        first={index === 0}
+                      />
+                    ) : null}
+                    {group.rows.map((row) => (
+                      <OutcomeRow
+                        key={`${group.key}:${row.key}`}
+                        row={row}
+                        scope={scope}
+                        currentOutcomePath={outcomePath}
+                        filters={rowFilters}
+                        promotionOptions={promotionOptions}
+                        perfOptions={perfOptions}
+                        entryGroup={group.entryGroup}
+                      />
+                    ))}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

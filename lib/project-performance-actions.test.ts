@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const projectFindUnique = vi.fn();
   const perfCategoryFindFirst = vi.fn();
+  const perfCategoryFindMany = vi.fn();
   const eventCreate = vi.fn();
   const eventFindUnique = vi.fn();
   const eventDeleteMany = vi.fn();
   const tx = {
     project: { findUnique: projectFindUnique },
-    perfCategory: { findFirst: perfCategoryFindFirst },
+    perfCategory: { findFirst: perfCategoryFindFirst, findMany: perfCategoryFindMany },
     projectPerformanceEvent: {
       create: eventCreate,
       findUnique: eventFindUnique,
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => {
     transaction: vi.fn(),
     projectFindUnique,
     perfCategoryFindFirst,
+    perfCategoryFindMany,
     eventCreate,
     eventFindUnique,
     eventDeleteMany,
@@ -43,7 +45,6 @@ import {
   createProjectPerformanceEvent,
   deleteProjectPerformanceEvent,
 } from "@/app/(app)/projects/[id]/project-performance-actions";
-import { PROJECT_PERF_MINORS } from "@/lib/project-performance";
 
 const sourceProject = {
   title: "生成式人工智能赋能制造业研究",
@@ -99,10 +100,12 @@ beforeEach(() => {
     async (callback: (tx: typeof mocks.tx) => Promise<unknown>) => callback(mocks.tx),
   );
   mocks.projectFindUnique.mockResolvedValue(sourceProject);
-  mocks.perfCategoryFindFirst.mockImplementation(
-    async (args: { orderBy?: { year: string } }) =>
-      args.orderBy ? { year: 2026 } : { id: "perf-1" },
-  );
+  mocks.perfCategoryFindFirst.mockResolvedValue({ year: 2026 });
+  // 当前年度启用中的小类：勾了「课题可挂」的只有 perf-1，所以 perf-paper 不在候选里
+  mocks.perfCategoryFindMany.mockResolvedValue([
+    { id: "perf-1", projectEligible: true },
+    { id: "perf-paper", projectEligible: false },
+  ]);
   mocks.eventCreate.mockResolvedValue({ id: "event-1" });
   mocks.eventFindUnique.mockResolvedValue(nativeEvent);
   mocks.eventDeleteMany.mockResolvedValue({ count: 1 });
@@ -133,18 +136,14 @@ describe("createProjectPerformanceEvent", () => {
     expect(mocks.projectFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "project-1" } }),
     );
-    expect(mocks.perfCategoryFindFirst).toHaveBeenNthCalledWith(1, {
+    expect(mocks.perfCategoryFindFirst).toHaveBeenCalledWith({
       orderBy: { year: "desc" },
       select: { year: true },
     });
-    expect(mocks.perfCategoryFindFirst).toHaveBeenNthCalledWith(2, {
-      where: {
-        id: "perf-1",
-        year: 2026,
-        isActive: true,
-        minorCategory: { in: [...PROJECT_PERF_MINORS] },
-      },
-      select: { id: true },
+    // 候选只在当前年度、启用中的里面挑；「课题可挂」的筛选在 projectEligibleOf 里做
+    expect(mocks.perfCategoryFindMany).toHaveBeenCalledWith({
+      where: { year: 2026, isActive: true },
+      select: { id: true, projectEligible: true },
     });
     expect(mocks.eventCreate).toHaveBeenCalledWith({
       data: {
@@ -193,16 +192,13 @@ describe("createProjectPerformanceEvent", () => {
     expect(mocks.logActivity).not.toHaveBeenCalled();
   });
 
+  // 已停用、旧年度的根本不在 findMany 的结果里（查询条件挡掉）；没勾「课题可挂」的被 projectEligibleOf 挡掉
   it.each([
-    ["非候选小类", "perf-paper"],
+    ["没勾「课题可挂」的小类", "perf-paper"],
     ["已停用分类", "perf-inactive"],
     ["旧年度分类", "perf-old"],
     ["伪造编号", "perf-forged"],
   ])("rejects %s without creating or logging", async (_case, perfCategoryId) => {
-    mocks.perfCategoryFindFirst
-      .mockResolvedValueOnce({ year: 2026 })
-      .mockResolvedValueOnce(null);
-
     const result = await createProjectPerformanceEvent(
       "project-1",
       { ok: false },
@@ -216,6 +212,24 @@ describe("createProjectPerformanceEvent", () => {
     expect(mocks.eventCreate).not.toHaveBeenCalled();
     expect(mocks.logActivity).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("一项都没勾「课题可挂」时，当前年度启用中的小类都能选（刚导进来的表谁也没勾过）", async () => {
+    mocks.perfCategoryFindMany.mockResolvedValueOnce([
+      { id: "perf-1", projectEligible: false },
+      { id: "perf-paper", projectEligible: false },
+    ]);
+
+    const result = await createProjectPerformanceEvent(
+      "project-1",
+      { ok: false },
+      createForm({ perfCategoryId: "perf-paper" }),
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(mocks.eventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ perfCategoryId: "perf-paper" }),
+    });
   });
 
   it("returns a sanitized failure and does not revalidate when activity logging fails", async () => {

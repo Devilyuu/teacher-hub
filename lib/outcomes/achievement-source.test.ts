@@ -9,6 +9,13 @@ const competition = {
   competition: { name: "职业院校技能大赛" },
 };
 
+const menteeProject = {
+  id: "project-1",
+  title: "非遗纹样生成工具",
+  schoolYear: "2025—2026 学年",
+  kind: { name: "毕业设计" },
+};
+
 const teaching = {
   id: "import-1",
   title: "第 8 周 · 单元测试",
@@ -57,13 +64,34 @@ describe("achievementSources", () => {
     expect(source?.hint).toBeNull();
   });
 
-  it("参赛排在教案回流前面——它带日期、队员和证书，核对时先看它", () => {
+  it("学生项目跳回项目详情；类型和学年拼成补充信息", () => {
+    expect(achievementSources({ menteeProjects: [menteeProject] })).toEqual([
+      {
+        key: "mentee:project-1",
+        kind: "mentee",
+        kindLabel: "学生项目",
+        label: "非遗纹样生成工具",
+        href: "/mentees/projects/project-1",
+        hint: "毕业设计 · 2025—2026 学年",
+      },
+    ]);
+  });
+
+  it("学生项目没写学年时补充信息只剩类型，不留一个空的分隔点", () => {
+    const [source] = achievementSources({
+      menteeProjects: [{ ...menteeProject, schoolYear: null }],
+    });
+    expect(source?.hint).toBe("毕业设计");
+  });
+
+  it("参赛、学生项目、教案回流依次排——前两个带日期、学生和证书，核对时先看它们", () => {
     expect(
       achievementSources({
         competitionEntries: [competition],
+        menteeProjects: [menteeProject],
         teachingImports: [teaching],
       }).map((source) => source.kind),
-    ).toEqual(["competition", "teaching"]);
+    ).toEqual(["competition", "mentee", "teaching"]);
   });
 
   it("同类多条全部返回，不按「最多一个」把后面的吞掉", () => {

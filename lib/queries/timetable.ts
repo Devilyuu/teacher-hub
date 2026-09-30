@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { todayAsDateOnly } from "@/lib/date";
 import { getSemesters } from "@/lib/queries/semesters";
@@ -9,8 +10,10 @@ import {
   type WeekTimetable,
 } from "@/lib/timetable";
 
-/** 某学期的全部课表条目，按周几、节次排 */
-export function getTimetableSlots(semesterId: string) {
+/** 某学期的全部课表条目，按周几、节次排。首页问候行和本周课表各要一份，同一请求只查一次 */
+export const getTimetableSlots = cache(getTimetableSlotsUncached);
+
+function getTimetableSlotsUncached(semesterId: string) {
   return prisma.timetableSlot.findMany({
     where: { semesterId },
     orderBy: [{ weekday: "asc" }, { periodStart: "asc" }, { courseName: "asc" }],

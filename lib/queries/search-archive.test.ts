@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   studentFindMany: vi.fn(),
   honorFindMany: vi.fn(),
   competitionEntryFindMany: vi.fn(),
+  menteeFindMany: vi.fn(),
+  menteeProjectFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -23,6 +25,8 @@ vi.mock("@/lib/db", () => ({
     student: { findMany: mocks.studentFindMany },
     studentHonor: { findMany: mocks.honorFindMany },
     competitionEntry: { findMany: mocks.competitionEntryFindMany },
+    mentee: { findMany: mocks.menteeFindMany },
+    menteeProject: { findMany: mocks.menteeProjectFindMany },
   },
 }));
 
@@ -206,6 +210,8 @@ describe("global search query boundaries", () => {
         student: 0,
         honor: 0,
         competition: 0,
+        mentee: 0,
+        menteeProject: 0,
       },
     });
     for (const mock of Object.values(mocks)) expect(mock).not.toHaveBeenCalled();
@@ -279,6 +285,8 @@ describe("global search query boundaries", () => {
       student: 0,
       honor: 0,
       competition: 0,
+      mentee: 0,
+      menteeProject: 0,
     });
     expect(results.hits).not.toContainEqual(
       expect.objectContaining({ id: "document-missing-category-relation" }),
@@ -349,6 +357,8 @@ describe("global search query boundaries", () => {
       student: 0,
       honor: 0,
       competition: 0,
+      mentee: 0,
+      menteeProject: 0,
     });
     expect(results.hits.map(({ kind, id, href }) => ({ kind, id, href }))).toEqual([
       { kind: "project", id: "project-1", href: "/projects/project-1" },
@@ -370,6 +380,8 @@ describe("global search query boundaries", () => {
       | "student"
       | "honor"
       | "competition"
+      | "mentee"
+      | "menteeProject"
     >();
   });
 
@@ -384,5 +396,27 @@ describe("global search query boundaries", () => {
     await search("技能", { ...ALL_ON, competitions: false });
 
     expect(mocks.competitionEntryFindMany).not.toHaveBeenCalled();
+  });
+
+  it("导师模块关闭时不查导师学生，也不查学生项目", async () => {
+    await search("林", { ...ALL_ON, mentor: false });
+
+    expect(mocks.menteeFindMany).not.toHaveBeenCalled();
+    expect(mocks.menteeProjectFindMany).not.toHaveBeenCalled();
+  });
+
+  it("两个学生模块各管各的：关掉班主任不影响导师学生，反之亦然", async () => {
+    // advisor 和 mentor 是**两个模块、两张表**，而英文 advisor 本义就是「导师」。
+    // 哪天有人图省事把两处的开关判断合并，这条会红
+    await search("林", { ...ALL_ON, advisor: false });
+    expect(mocks.studentFindMany).not.toHaveBeenCalled();
+    expect(mocks.menteeFindMany).toHaveBeenCalledOnce();
+
+    vi.clearAllMocks();
+    for (const mock of Object.values(mocks)) mock.mockResolvedValue([]);
+
+    await search("林", { ...ALL_ON, mentor: false });
+    expect(mocks.menteeFindMany).not.toHaveBeenCalled();
+    expect(mocks.studentFindMany).toHaveBeenCalledOnce();
   });
 });

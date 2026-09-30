@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BACKUP_NOTE,
+  withOwnAuditRow,
   assertCountsMatch,
   backupFileName,
   closeDocument,
@@ -112,5 +114,25 @@ describe("行数一致性", () => {
     const run = () => assertCountsMatch({ Project: 1, Task: 5 }, { Project: 0, Task: 4 });
     expect(run).toThrow(/Project/);
     expect(run).toThrow(/Task/);
+  });
+});
+
+describe("下载接口自己写的那笔审计", () => {
+  it("承诺给 ActivityLog 的行数补上它，其余表不动", () => {
+    const counted: BackupMeta = { ...meta, tableCounts: { Project: 2, ActivityLog: 9 } };
+    const promised = withOwnAuditRow(counted);
+    expect(promised.tableCounts).toEqual({ Project: 2, ActivityLog: 10 });
+    expect(counted.tableCounts.ActivityLog).toBe(9);
+    // 2026-09-28 桌面安装版上的实际报错就是这一对数
+    expect(() => assertCountsMatch(counted.tableCounts, { Project: 2, ActivityLog: 10 })).toThrow(/承诺 9、实际 10/);
+    expect(() => assertCountsMatch(promised.tableCounts, { Project: 2, ActivityLog: 10 })).not.toThrow();
+  });
+
+  it("接口是在写完审计之后才用补过的承诺出流", () => {
+    const route = readFileSync("app/api/backup/route.ts", "utf8");
+    const audit = route.indexOf('"backup.download"');
+    const stream = route.indexOf("streamBackup(withOwnAuditRow(meta))");
+    expect(audit).toBeGreaterThan(0);
+    expect(stream).toBeGreaterThan(audit);
   });
 });

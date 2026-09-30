@@ -21,8 +21,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/server-auth", () => ({ requireSession: mocks.requireSession }));
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/storage", async () => ({
   MAX_UPLOAD_BYTES: 25 * 1024 * 1024,
+  // 纯函数、不碰磁盘，用真的（上传动作进库前拿它截短文件名）
+  clampUploadFilename: (
+    await vi.importActual<typeof import("@/lib/storage")>("@/lib/storage")
+  ).clampUploadFilename,
   isAllowedUpload: vi.fn(() => true),
   projectScope: vi.fn((id: string) => `projects/${id}`),
   achievementScope: vi.fn((id: string) => `achievements/${id}`),

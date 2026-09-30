@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { sessionGuard } from "@/lib/server-auth";
-import { canPreviewInline, readUpload } from "@/lib/storage";
+import { canPreviewInline, clampUploadFilename, readUpload } from "@/lib/storage";
 
 /**
  * 附件下载 / 预览。
@@ -42,8 +42,9 @@ export async function GET(
   const forceDownload = request.nextUrl.searchParams.get("download") === "1";
   const inline = !forceDownload && canPreviewInline(attachment.mimeType);
 
-  // RFC 5987：中文文件名必须走 filename*，否则浏览器拿到乱码
-  const encodedName = encodeURIComponent(attachment.filename);
+  // RFC 5987：中文文件名必须走 filename*，否则浏览器拿到乱码。
+  // 上传时已截短；这里再截一次是给截短之前存进来的老数据兜底（太长会撑成 502）
+  const encodedName = encodeURIComponent(clampUploadFilename(attachment.filename));
   const disposition = `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodedName}`;
 
   return new NextResponse(new Uint8Array(bytes), {

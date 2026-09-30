@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BrandMark } from "@/components/brand-mark";
+import { isDesktopEdition } from "@/lib/edition";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
@@ -26,6 +27,13 @@ export default async function LoginPage({
           </p>
         </div>
         <LoginForm from={from} />
+        {/* 桌面版的口令是本机配置里的，服务器上那套「问管理员」不适用。手机上多半是扫码进来的，
+            忘了口令也只能回电脑上看 */}
+        {isDesktopEdition() ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            忘了口令：在电脑上的教师个人中台里打开菜单「文件 → 手机访问」就能看到。
+          </p>
+        ) : null}
       </div>
     </main>
   );

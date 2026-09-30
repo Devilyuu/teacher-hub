@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Download } from "lucide-react";
+import { Download, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PreflightReport } from "@/lib/export/preflight";
 
@@ -21,6 +21,8 @@ export function DeclarationExportActions({
 }) {
   const [includeUnverified, setIncludeUnverified] = useState(false);
   const [includeMissingYear, setIncludeMissingYear] = useState(false);
+  // 连同支撑材料打成 ZIP。两个表单共用这一个开关：带问题导出时同样要材料
+  const [withMaterials, setWithMaterials] = useState(false);
   const label = KIND_LABELS[report.kind];
   const unverifiedCount =
     report.issues.find((issue) => issue.code === "unverified" && issue.scope === "excluded")
@@ -30,14 +32,18 @@ export function DeclarationExportActions({
       ?.count ?? 0;
   const hasOverrideChoices = unverifiedCount > 0 || missingYearCount > 0;
   const hasSelection = includeUnverified || includeMissingYear;
-  const selectedCount =
+  const combination =
     includeUnverified && includeMissingYear
-      ? report.includedCounts.includeBoth
+      ? "includeBoth"
       : includeUnverified
-        ? report.includedCounts.includeUnverified
+        ? "includeUnverified"
         : includeMissingYear
-          ? report.includedCounts.includeMissingYear
-          : report.includedCounts.safe;
+          ? "includeMissingYear"
+          : "safe";
+  const selectedCount = report.includedCounts[combination];
+  const selectedMaterialCount = report.materialCounts[combination];
+  // 四种组合里「都放进来」那种材料最多；它也是 0 就没什么可打包的
+  const anyMaterials = report.materialCounts.includeBoth > 0;
 
   function setFreshRequestKey(form: HTMLFormElement) {
     const field = form.elements.namedItem("requestKey");
@@ -59,9 +65,15 @@ export function DeclarationExportActions({
       includeUnverified ? `允许纳入未核实成果（检测到 ${unverifiedCount} 条）` : null,
       includeMissingYear ? `允许纳入未分配年度成果（检测到 ${missingYearCount} 条）` : null,
     ].filter(Boolean);
+    // 职称表的 year 是申报年度，写成「2027 年职称量化表」会被读成 2027 年的成果
+    const target =
+      report.kind === "promotion" ? `按 ${year} 年申报的${label}` : ` ${year} 年${label}`;
+    const packing = withMaterials
+      ? `\n连同 ${selectedMaterialCount} 份支撑材料打成 ZIP，文件按明细表序号命名。`
+      : "";
     if (
       !window.confirm(
-        `确认带问题导出 ${year} 年${label}？\n\n${selected.join("、")}。\n按当前数据最终会导出 ${selectedCount} 条，工作簿会附上“质量说明”。`,
+        `确认带问题导出${target}？\n\n${selected.join("、")}。\n按当前数据最终会导出 ${selectedCount} 条，工作簿会附上“质量说明”。${packing}`,
       )
     ) {
       event.preventDefault();
@@ -75,12 +87,31 @@ export function DeclarationExportActions({
         <input type="hidden" name="year" value={year} />
         <input type="hidden" name="preflightFingerprint" value={preflightFingerprint} />
         <input type="hidden" name="requestKey" value="" />
+        <input type="hidden" name="format" value={withMaterials ? "zip" : "xlsx"} />
         <Button type="submit" variant="outline" size="sm">
-          <Download className="size-3.5" aria-hidden />
+          {withMaterials ? (
+            <FileArchive className="size-3.5" aria-hidden />
+          ) : (
+            <Download className="size-3.5" aria-hidden />
+          )}
           {label}
-          <span className="ml-1 tabular-nums opacity-70">{report.includedCount}</span>
+          <span className="ml-1 tabular-nums text-muted-foreground">{report.includedCount}</span>
         </Button>
       </form>
+
+      {/* 申报包 = 申报表 + 按序号命名的支撑材料（prd-ledger 4.2）。
+          数字是默认导出那几条的材料份数，和明细表「材料份数」一列相加对得上 */}
+      {anyMaterials ? (
+        <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={withMaterials}
+            onChange={(event) => setWithMaterials(event.target.checked)}
+            className="size-3.5 accent-foreground"
+          />
+          连同支撑材料打包（{report.materialCounts.safe} 份）
+        </label>
+      ) : null}
 
       {hasOverrideChoices ? (
         <form
@@ -94,6 +125,7 @@ export function DeclarationExportActions({
           <input type="hidden" name="confirmIssues" value="true" />
           <input type="hidden" name="preflightFingerprint" value={preflightFingerprint} />
           <input type="hidden" name="requestKey" value="" />
+          <input type="hidden" name="format" value={withMaterials ? "zip" : "xlsx"} />
 
           {unverifiedCount > 0 ? (
             <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">

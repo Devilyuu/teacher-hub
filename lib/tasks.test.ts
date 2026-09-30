@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { dateOnly } from "@/lib/date";
 import {
+  SELF_ASSIGNEE,
   dueHint,
   todayQueueTasks,
   isDone,
   isDueToday,
   isOverdue,
+  isWaitingOn,
+  normalizeAssignee,
   parseTags,
   sortTasks,
   type TaskLike,
@@ -146,6 +149,13 @@ describe("todayQueueTasks", () => {
     expect(inbox).not.toContain(noDue);
   });
 
+  it("等别人的不进——它们在首页右栏自己那张卡上", () => {
+    const waiting = { ...task({ dueDate: dateOnly(2026, 7, 1), priority: "HIGH" }), assignee: "张老师" };
+    const mine = { ...task({ dueDate: dateOnly(2026, 7, 1) }), assignee: "我" };
+    const queue = todayQueueTasks([waiting, mine], NOW);
+    expect(queue).toEqual([mine]);
+  });
+
   it("做完的一律不进——收件箱里的每条都应该是能被处理掉的", () => {
     const done = task({ status: "DONE", dueDate: dateOnly(2026, 7, 1), priority: "HIGH" });
     expect(todayQueueTasks([done], NOW)).toHaveLength(0);
@@ -163,5 +173,30 @@ describe("isDone", () => {
     expect(isDone({ status: "DONE" })).toBe(true);
     expect(isDone({ status: "DOING" })).toBe(false);
     expect(isDone({ status: "TODO" })).toBe(false);
+  });
+});
+
+describe("normalizeAssignee", () => {
+  it("留空、只有空白都算我", () => {
+    expect(normalizeAssignee(undefined)).toBe(SELF_ASSIGNEE);
+    expect(normalizeAssignee("")).toBe(SELF_ASSIGNEE);
+    expect(normalizeAssignee("   ")).toBe(SELF_ASSIGNEE);
+  });
+
+  it("别人的名字去掉首尾空白原样保留", () => {
+    expect(normalizeAssignee(" 张老师 ")).toBe("张老师");
+  });
+});
+
+describe("isWaitingOn（首页「等别人」）", () => {
+  it("负责人不是我、没做完的才算", () => {
+    expect(isWaitingOn({ status: "TODO", assignee: "张老师" })).toBe(true);
+    expect(isWaitingOn({ status: "DOING", assignee: "财务处" })).toBe(true);
+  });
+
+  it("我自己的、空白负责人的、做完的都不算", () => {
+    expect(isWaitingOn({ status: "TODO", assignee: "我" })).toBe(false);
+    expect(isWaitingOn({ status: "TODO", assignee: "  " })).toBe(false);
+    expect(isWaitingOn({ status: "DONE", assignee: "张老师" })).toBe(false);
   });
 });

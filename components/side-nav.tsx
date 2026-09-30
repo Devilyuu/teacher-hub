@@ -26,7 +26,14 @@ import { logout } from "@/app/login/actions";
  * 留在内容区的 tabs 组件里。两处都画一遍就是同一件事有两个入口，
  * 而侧栏一展开二级，收起态又没地方放它们。
  */
-export function SideNav({ modules }: { modules: ModuleVisibility }) {
+export function SideNav({
+  modules,
+  showLogout = true,
+}: {
+  modules: ModuleVisibility;
+  /** 桌面版电脑上的窗口不放「退出」（app/(app)/layout.tsx） */
+  showLogout?: boolean;
+}) {
   const pathname = usePathname();
   const activeHref = activeNavHref(pathname);
 
@@ -83,8 +90,8 @@ export function SideNav({ modules }: { modules: ModuleVisibility }) {
             className={cn(
               "side-item relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
               active
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ? "bg-card text-accent-foreground shadow-[var(--pill-shadow)]"
+                : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
             )}
           >
             {active ? (
@@ -111,16 +118,18 @@ export function SideNav({ modules }: { modules: ModuleVisibility }) {
           <Settings className="size-[18px] shrink-0" aria-hidden />
           <span className="side-label truncate">设置</span>
         </Link>
-        <form action={logout}>
-          <button
-            type="submit"
-            title="退出"
-            className="side-item flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <LogOut className="size-[18px] shrink-0" aria-hidden />
-            <span className="side-label truncate">退出</span>
-          </button>
-        </form>
+        {showLogout ? (
+          <form action={logout}>
+            <button
+              type="submit"
+              title="退出"
+              className="side-item flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <LogOut className="size-[18px] shrink-0" aria-hidden />
+              <span className="side-label truncate">退出</span>
+            </button>
+          </form>
+        ) : null}
       </div>
     </aside>
   );

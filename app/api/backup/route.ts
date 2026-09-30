@@ -1,8 +1,8 @@
 import { verifyPasscode } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
 import { buildBackupMeta, streamBackup } from "@/lib/backup/export";
-import { backupFileName } from "@/lib/backup/serialize";
-import { isSameOrigin } from "@/lib/export/request";
+import { backupFileName, withOwnAuditRow } from "@/lib/backup/serialize";
+import { isSameOriginRequest } from "@/lib/export/request";
 import { sessionGuard } from "@/lib/server-auth";
 
 /**
@@ -27,8 +27,7 @@ export async function POST(request: Request) {
   const denied = await sessionGuard();
   if (denied) return denied;
 
-  const requestUrl = new URL(request.url);
-  if (!isSameOrigin(requestUrl, request.headers.get("origin"))) {
+  if (!isSameOriginRequest(request)) {
     return Response.json({ error: "拒绝跨站备份请求" }, { status: 403 });
   }
 
@@ -37,7 +36,7 @@ export async function POST(request: Request) {
 
   let accepted = false;
   try {
-    accepted = typeof passcode === "string" && verifyPasscode(passcode);
+    accepted = typeof passcode === "string" && (await verifyPasscode(passcode));
   } catch {
     // verifyPasscode 在缺 APP_PASSCODE 时抛错。这属于服务端配置问题，
     // 但对调用方仍然只能是「口令不对」——不泄漏服务端配没配口令
@@ -70,7 +69,8 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const chunk of streamBackup(meta)) {
+        // 上面那笔审计是数完行才写的，它自己也会被导出去（withOwnAuditRow 的注释）
+        for await (const chunk of streamBackup(withOwnAuditRow(meta))) {
           controller.enqueue(encoder.encode(chunk));
         }
         controller.close();

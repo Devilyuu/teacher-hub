@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { todayAsDateOnly } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { IDLE_FORM_STATE, toFormState, type FormState } from "@/lib/form-state";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import {
   captureFormSchema,
+  captureMenteeRecordSchema,
   captureSnoozeSchema,
   captureStudentRecordSchema,
 } from "@/lib/schemas/capture";
@@ -77,11 +79,29 @@ export async function restoreCapture(id: string) {
 }
 
 /**
+ * 在事务里**认领**这条速记：只有把它从「未转」改成「已转」的那个请求才往下建实体。
+ *
+ * 2026-09-26 前的写法是「事务外先查 status，没转过就进事务建」，注释说「幂等靠 @unique 外键兜底」——
+ * **兜不住**：@unique 管的是「一个任务不被两条速记指着」，管不了「一条速记转出两个任务」。
+ * 双击或两个标签页同时点，两个请求都读到「未转」、各建一个，后写的覆盖转换指针，
+ * 先建的那个成了没人指着的孤儿。认领用 updateMany 带条件：并发的第二个会被行锁挡到第一个提交后，
+ * 再读到「已转」，改到 0 行就收手（同 ensureRecurringTasks 的 lastRunYmd 认领）
+ */
+async function claimCapture(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
+  const claimed = await tx.captureItem.updateMany({
+    where: { id, status: { not: "CONVERTED" } },
+    data: { status: "CONVERTED", handledAt: new Date() },
+  });
+  return claimed.count === 1;
+}
+
+const ALREADY_CONVERTED: FormState = { ...IDLE_FORM_STATE, ok: true, message: "这条已经转过了" };
+
+/**
  * 转成正式记录。
  *
- * **幂等靠三个 @unique 外键兜底**：同一条速记不可能转出两个实体。
- * 重复提交（手抖点两次、网络重试）时先查一次已转结果直接返回，
- * 而不是抛唯一约束异常糊到用户脸上。
+ * 重复提交（手抖点两次、网络重试）时照实说「已经转过了」，不抛异常糊到用户脸上；
+ * 同时并发的两次靠 `claimCapture` 保证只建一个实体。
  *
  * 转换后原记录保留转换指针，不再出现在待处理列表——
  * **不删**，因为「这条成果是哪天随手记下来的」是有用的线索。
@@ -92,21 +112,19 @@ export async function convertCapture(id: string): Promise<FormState> {
   const item = await prisma.captureItem.findUnique({ where: { id } });
   if (!item) return { ok: false, message: "这条速记已经不在了" };
 
-  if (item.status === "CONVERTED") {
-    return { ...IDLE_FORM_STATE, ok: true, message: "这条已经转过了" };
-  }
+  // 已经转过的直接说，不必进事务；并发的那种由 claimCapture 兜住
+  if (item.status === "CONVERTED") return ALREADY_CONVERTED;
 
   const title = item.title.trim();
   const note = item.content?.trim() || null;
 
-  await prisma.$transaction(async (tx) => {
+  const converted = await prisma.$transaction(async (tx) => {
+    if (!(await claimCapture(tx, id))) return false;
+
     if (item.kind === "TASK") {
       const task = await tx.task.create({ data: { title, note, source: "SELF" } });
-      await tx.captureItem.update({
-        where: { id },
-        data: { status: "CONVERTED", convertedTaskId: task.id, handledAt: new Date() },
-      });
-      return;
+      await tx.captureItem.update({ where: { id }, data: { convertedTaskId: task.id } });
+      return true;
     }
 
     if (item.kind === "ACHIEVEMENT") {
@@ -117,24 +135,19 @@ export async function convertCapture(id: string): Promise<FormState> {
       });
       await tx.captureItem.update({
         where: { id },
-        data: {
-          status: "CONVERTED",
-          convertedAchievementId: achievement.id,
-          handledAt: new Date(),
-        },
+        data: { convertedAchievementId: achievement.id },
       });
-      return;
+      return true;
     }
 
     // NOTE → 会议。时间先按当下，进详情页再改
     const meeting = await tx.meeting.create({
       data: { title, minutes: note, meetingTime: new Date(), type: "TEMP" },
     });
-    await tx.captureItem.update({
-      where: { id },
-      data: { status: "CONVERTED", convertedMeetingId: meeting.id, handledAt: new Date() },
-    });
+    await tx.captureItem.update({ where: { id }, data: { convertedMeetingId: meeting.id } });
+    return true;
   });
+  if (!converted) return ALREADY_CONVERTED;
 
   revalidateCapture();
   revalidatePath("/tasks");
@@ -162,9 +175,7 @@ export async function convertCaptureToStudentRecord(
 
   const item = await prisma.captureItem.findUnique({ where: { id } });
   if (!item) return { ok: false, message: "这条速记已经不在了" };
-  if (item.status === "CONVERTED") {
-    return { ...IDLE_FORM_STATE, ok: true, message: "这条已经转过了" };
-  }
+  if (item.status === "CONVERTED") return ALREADY_CONVERTED;
 
   const { classGroupId, typeId, studentId } = parsed.data;
 
@@ -186,7 +197,8 @@ export async function convertCaptureToStudentRecord(
 
   const content = [item.title.trim(), item.content?.trim()].filter(Boolean).join("\n");
 
-  await prisma.$transaction(async (tx) => {
+  const converted = await prisma.$transaction(async (tx) => {
+    if (!(await claimCapture(tx, id))) return false;
     const record = await tx.studentRecord.create({
       data: {
         classGroupId,
@@ -198,15 +210,80 @@ export async function convertCaptureToStudentRecord(
     });
     await tx.captureItem.update({
       where: { id },
-      data: {
-        status: "CONVERTED",
-        convertedStudentRecordId: record.id,
-        handledAt: new Date(),
-      },
+      data: { convertedStudentRecordId: record.id },
     });
+    return true;
   });
+  if (!converted) return ALREADY_CONVERTED;
 
   revalidateCapture();
   revalidatePath("/students/records");
   return { ...IDLE_FORM_STATE, ok: true, message: "已归到学生记录" };
+}
+
+/**
+ * 速记 → 指导记录（学业导师模块）。这是导师模块记录流水的主入口，
+ * 理由和班主任那条一样：随手记一句，归类时选「归到导师学生」，
+ * 比打开模块填表单少一次打开动作。
+ *
+ * **和上面那个 convertCaptureToStudentRecord 不复用**——两个模块是两张表、
+ * 两个转换指针、两个开关。合并成一个带 target 参数的函数，读的人就得先去
+ * 查参数才知道这条速记落到了哪张表上，而那两张表的归属列还不一样。
+ */
+export async function convertCaptureToMenteeRecord(
+  id: string,
+  formData: FormData,
+): Promise<FormState> {
+  await requireSession();
+
+  const parsed = captureMenteeRecordSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return toFormState(parsed.error);
+
+  const item = await prisma.captureItem.findUnique({ where: { id } });
+  if (!item) return { ok: false, message: "这条速记已经不在了" };
+  if (item.status === "CONVERTED") return ALREADY_CONVERTED;
+
+  const { batchId, typeId, menteeId } = parsed.data;
+
+  // 归属拿库里的值复核，不信表单
+  const [batch, recordType, mentee] = await Promise.all([
+    prisma.menteeBatch.findUnique({ where: { id: batchId }, select: { id: true } }),
+    prisma.menteeRecordType.findUnique({ where: { id: typeId }, select: { id: true } }),
+    menteeId
+      ? prisma.mentee.findUnique({
+          where: { id: menteeId },
+          select: { batchId: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  if (!batch || !recordType) return { ok: false, message: "批次或类型不存在，刷新后重试" };
+  if (menteeId && mentee?.batchId !== batchId) {
+    return { ok: false, message: "这名学生不在这一批里，刷新后重试" };
+  }
+
+  const content = [item.title.trim(), item.content?.trim()].filter(Boolean).join("\n");
+
+  const converted = await prisma.$transaction(async (tx) => {
+    if (!(await claimCapture(tx, id))) return false;
+    const record = await tx.menteeRecord.create({
+      data: {
+        batchId,
+        typeId,
+        date: todayAsDateOnly(),
+        content,
+        members: menteeId ? { create: [{ menteeId }] } : undefined,
+      },
+    });
+    await tx.captureItem.update({
+      where: { id },
+      data: { convertedMenteeRecordId: record.id },
+    });
+    return true;
+  });
+  if (!converted) return ALREADY_CONVERTED;
+
+  revalidateCapture();
+  revalidatePath("/mentees/records");
+  revalidatePath("/mentees");
+  return { ...IDLE_FORM_STATE, ok: true, message: "已归到指导记录" };
 }

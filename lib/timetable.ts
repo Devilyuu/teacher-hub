@@ -483,3 +483,53 @@ export function buildWeekTimetable(
 
   return { days, halfDays, busyHalfDays };
 }
+
+// ── 翻周 ──
+
+/**
+ * 这学期的课表排到第几周。翻周视图靠它决定「下一周」翻到哪停，
+ * 一条课表都没有返回 0。超出量程（lib/semester.ts）的周次不算——
+ * 导出表里偶尔会有「1-30周」这种手误，跟着它画三十个周次胶囊没有意义。
+ */
+export function lastScheduledWeek(slots: readonly Pick<SlotLike, "weeks">[]): number {
+  let last = 0;
+  for (const slot of slots) {
+    for (const week of slot.weeks) {
+      if (week > last && week <= MAX_TEACHING_WEEKS) last = week;
+    }
+  }
+  return last;
+}
+
+export type BrowseWeek = {
+  /** 要显示哪一个教学周 */
+  week: number;
+  /** 一共能翻到第几周 */
+  maxWeek: number;
+  /** 今天所在的教学周；没开学、假期、超量程都是 null */
+  currentWeek: number | null;
+};
+
+/**
+ * 翻周视图默认显示哪一周。
+ *
+ * **默认落在今天所在的那一周**，不是第 1 周：从首页「本周课表」点进来的人
+ * 要看的是「本周和再往后」，落在第 1 周得先自己翻十几次。假期里没有「今天」，
+ * 落到第 1 周。
+ *
+ * 请求的周次一律夹到 [1, maxWeek]，URL 上手改成 999 就显示最后一周，
+ * 不报错也不 404——校验永远不阻止（第 3 条铁律）。
+ */
+export function resolveBrowseWeek(
+  slots: readonly Pick<SlotLike, "weeks">[],
+  startDate: Date,
+  today: Date,
+  requested?: string | null,
+): BrowseWeek {
+  const currentWeek = teachingPosition(startDate, today)?.week ?? null;
+  // 今天已经走过课表排到的最后一周（考试周里翻课表）时仍要翻得到今天
+  const maxWeek = Math.max(lastScheduledWeek(slots), currentWeek ?? 0, 1);
+  const parsed = Number.parseInt(requested ?? "", 10);
+  const wanted = Number.isFinite(parsed) && parsed > 0 ? parsed : (currentWeek ?? 1);
+  return { week: Math.min(Math.max(wanted, 1), maxWeek), maxWeek, currentWeek };
+}

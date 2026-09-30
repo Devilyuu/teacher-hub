@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { ClearCalendarArt } from "@/components/empty-art";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -214,19 +215,15 @@ export function RecurringPanel({
                 </Button>
               </form>
 
-              {/* 已经生成出去的任务不跟着删——它们是独立的待办 */}
-              <form action={deleteRecurringRule.bind(null, rule.id)}>
-                <Button
-                  type="submit"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  title="删除规则"
-                  aria-label={`删除规则 ${rule.title}`}
-                >
-                  <Trash2 className="size-3.5" aria-hidden />
-                </Button>
-              </form>
+              {/* 已经生成出去的任务不跟着删——它们是独立的待办。硬删，走确认 */}
+              <ConfirmSubmitButton
+                action={deleteRecurringRule.bind(null, rule.id)}
+                message={`删除规则「${rule.title}」？已经生成的任务会留下，规则本身找不回来。`}
+                size="icon-sm"
+                label={`删除规则 ${rule.title}`}
+              >
+                <Trash2 className="size-3.5" aria-hidden />
+              </ConfirmSubmitButton>
             </li>
           ))}
         </ul>

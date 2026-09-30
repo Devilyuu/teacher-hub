@@ -23,6 +23,7 @@
     {
       "category": "科研与社会服务",
       "subcategory": "纵向课题立项",
+      "project_eligible": true,
       "national_rule": "25/项",
       "provincial_rule": "15/项",
       "city_rule": "8/项",

@@ -36,14 +36,14 @@ export default async function HonorDetailPage({
 
   return (
     <div className="space-y-6">
-      <StudentTabs />
+      <StudentTabs classId={honor.classGroupId} />
 
       <header className="flex flex-wrap items-end justify-between gap-4 pt-2">
         <div className="space-y-2">
           <h1 className="page-title">{honor.title}</h1>
           <p className="measure text-muted-foreground">{honor.classGroup.name}</p>
         </div>
-        <HonorDelete honorId={honor.id} title={honor.title} />
+        <HonorDelete honorId={honor.id} classGroupId={honor.classGroupId} title={honor.title} />
       </header>
 
       <HonorForm

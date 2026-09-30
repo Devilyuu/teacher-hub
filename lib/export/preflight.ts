@@ -5,14 +5,17 @@
  * 用户很容易把「能生成 Excel」理解成「可以提交」。而库里 73 条成果有 70 条未核实、
  * 68 条状态还是「选题」——这些会一声不响地进到交出去的表里。
  *
- * 纳入判定必须和 `filterForDeclaration` 逐条对齐：默认年度精确匹配且已核实，
+ * 纳入判定必须和 `filterForDeclaration` 逐条对齐：默认落在取数范围里
+ * （绩效按成果年度、职称按任现职时间窗，`inDeclarationPeriod`）且已核实，
  * 缺年度、未核实只有显式覆盖后才进入。对不齐的话，预检说的和导出的就是两回事。
  *
  * 纯函数，不碰数据库。
  */
 
+import { promotionWindow } from "@/lib/promotion";
 import {
   DEPARTMENT_PERFORMANCE_START_YEAR,
+  inDeclarationPeriod,
   type DeclarationSourceKind,
 } from "./declaration";
 
@@ -44,7 +47,8 @@ export type PreflightIssueCode =
   | "missingMaterial"
   | "suspiciousStatus"
   | "scoreWithoutCategory"
-  | "schoolRewarded";
+  | "schoolRewarded"
+  | "afterPromotionWindow";
 
 export type PreflightIssue = {
   code: PreflightIssueCode;
@@ -70,6 +74,7 @@ export type PreflightIssue = {
 
 export type PreflightReport = {
   kind: DeclarationKind;
+  /** 绩效表是成果年度，职称表是申报年度 */
   year: number;
   /** 会进到 Excel 里的条数。应与导出页显示的候选数一致 */
   includedCount: number;
@@ -77,12 +82,19 @@ export type PreflightReport = {
   flaggedCount: number;
   issues: PreflightIssue[];
   /** 四种安全覆盖组合各自最终会进入工作簿的精确条数 */
-  includedCounts: {
-    safe: number;
-    includeUnverified: number;
-    includeMissingYear: number;
-    includeBoth: number;
-  };
+  includedCounts: OverrideCounts;
+  /**
+   * 同样四种组合下，申报包 ZIP 里会有几份支撑材料（各行「材料份数」相加）。
+   * 课题的两条绩效事项各带一份课题材料，这里也各算一次——和包里的文件数一致
+   */
+  materialCounts: OverrideCounts;
+};
+
+export type OverrideCounts = {
+  safe: number;
+  includeUnverified: number;
+  includeMissingYear: number;
+  includeBoth: number;
 };
 
 export type DeclarationKind = "promotion" | "performance";
@@ -115,28 +127,47 @@ export type VerifyProgress = {
 };
 
 /**
- * 目标年度的核实进度。
+ * 目标年度的核实进度（成果页「待核实」视图顶上那条）。
  *
  * 清存量时**必须有这个数字**：待核实视图是「筛掉已核实的」，清完一条那条就
  * 从列表里消失，于是屏幕上永远只剩「还没做的」——看不出做了多少、还剩多少，
  * 也分不清哪些属于今年（该清）哪些是历史账（不用清）。
  *
- * 候选判定与 `preflightDeclaration` 共用精确年度和分类字段，
- * 保证这里的进度和导出页显示的条数是同一个口径。
- * **两个口径合起来去重**——一条成果可能同时挂绩效小类和职称指标，只算一条。
+ * 口径三条，都是为了和导出页说同一件事：
+ *
+ * 1. **按成果年度数，候选判定沿用导出预检那一套**：年度精确匹配、挂了该口径的分类、
+ *    2026 年起学校已奖励的不进绩效口径。「还剩 N 条」因此是导出页这一年绩效表
+ *    「未核实」提示里的那几条，加上职称表「未核实」里**年度是这一年**的那几条。
+ *    职称表按任现职时间窗取、一张表跨好几年（`inDeclarationPeriod`），
+ *    这里只数落在这一年的那部分——进度是按年清的，不按申报批次。
+ *    没填年度的导出页也算进「未核实」提示，但它们不属于任何年度，另有「缺年度」提示管
+ * 2. **两个口径合起来去重**——一条成果可能同时挂绩效小类和职称指标，只算一条
+ * 3. **课题本身不算**。它没有核实这一步（导出时恒为已核实，见 sources.ts 的
+ *    adaptProject），算进来的话一条没核就已经显示六七成，进度就失去意义了。
+ *    要核实的只有成果和课题的绩效事项
+ *
+ * 2026-09-25 从成果页合并（课题进联合视图）时掉线后接回，同时从「只数成果」
+ * 改成上面这套跨来源口径。
  */
 export function verifyProgress(
   items: PreflightAchievement[],
   year: number,
 ): VerifyProgress {
-  const candidates = items.filter(
-    (item) =>
-      inExactYear(item, year) &&
-      (item.perfCategoryId != null || item.promotionCategoryId != null),
-  );
+  const isCandidateFor = (item: PreflightAchievement, kind: DeclarationKind) =>
+    !excludedBySchoolReward(item, year, kind) &&
+    inExactYear(item, year) &&
+    categoryIdOf(item, kind) != null;
 
-  const total = candidates.length;
-  const verified = candidates.filter((item) => item.isVerified).length;
+  const candidates = new Map<string, PreflightAchievement>();
+  for (const item of items) {
+    if (item.sourceKind === "PROJECT") continue;
+    if (isCandidateFor(item, "promotion") || isCandidateFor(item, "performance")) {
+      candidates.set(`${item.sourceKind}:${item.sourceId}`, item);
+    }
+  }
+
+  const total = candidates.size;
+  const verified = [...candidates.values()].filter((item) => item.isVerified).length;
 
   return {
     year,
@@ -197,13 +228,25 @@ function excludedBySchoolReward(
  *
  * 排序按严重程度：先说漏掉的（你以为报了其实没报），再说脏的，
  * 最后说缺材料这类补起来最容易的。
+ *
+ * `year` 在绩效表是成果年度、在职称表是申报年度；`titleSince` 是档案里的
+ * 任现职日期，只有职称表用（null = 没填，只卡上限）。两个参数的口径和
+ * `filterForDeclaration` 完全一样，**必须传同一个值**
  */
 export function preflightDeclaration(
   items: PreflightAchievement[],
   year: number,
   kind: DeclarationKind,
+  titleSince: Date | null,
   options: { includeUnverified?: boolean; includeMissingYear?: boolean } = {},
 ): PreflightReport {
+  /** 年度已填且落在取数范围里；没填年度的另算 */
+  const inPeriod = (item: PreflightAchievement) =>
+    item.year != null && inDeclarationPeriod(item.year, year, kind, titleSince);
+  /** 落在范围里或者没填年度——「这条可能属于这张表」 */
+  const inPeriodOrMissing = (item: PreflightAchievement) =>
+    item.year == null || inPeriod(item);
+
   const selectIncluded = (selected: {
     includeUnverified?: boolean;
     includeMissingYear?: boolean;
@@ -211,22 +254,23 @@ export function preflightDeclaration(
     items.filter(
       (item) =>
         !excludedBySchoolReward(item, year, kind) &&
-        (inExactYear(item, year) ||
+        (inPeriod(item) ||
           (selected.includeMissingYear === true && item.year == null)) &&
         (item.isVerified || selected.includeUnverified === true) &&
         categoryIdOf(item, kind) != null,
     );
 
   const included = selectIncluded(options);
-  const includedCounts = {
-    safe: selectIncluded({}).length,
-    includeUnverified: selectIncluded({ includeUnverified: true }).length,
-    includeMissingYear: selectIncluded({ includeMissingYear: true }).length,
-    includeBoth: selectIncluded({
-      includeUnverified: true,
-      includeMissingYear: true,
-    }).length,
-  };
+  const countsBy = (measure: (rows: PreflightAchievement[]) => number): OverrideCounts => ({
+    safe: measure(selectIncluded({})),
+    includeUnverified: measure(selectIncluded({ includeUnverified: true })),
+    includeMissingYear: measure(selectIncluded({ includeMissingYear: true })),
+    includeBoth: measure(selectIncluded({ includeUnverified: true, includeMissingYear: true })),
+  });
+  const includedCounts = countsBy((rows) => rows.length);
+  const materialCounts = countsBy((rows) =>
+    rows.reduce((sum, item) => sum + item.attachmentCount, 0),
+  );
 
   /**
    * 填了分却没挂分类，**这条根本进不了表**。
@@ -237,7 +281,7 @@ export function preflightDeclaration(
    */
   const orphanScored = items.filter(
     (item) =>
-      (item.year === year || item.year == null) &&
+      inPeriodOrMissing(item) &&
       categoryIdOf(item, kind) == null &&
       scoreOf(item, kind) != null,
   );
@@ -245,9 +289,28 @@ export function preflightDeclaration(
     kind === "performance" && year >= DEPARTMENT_PERFORMANCE_START_YEAR
       ? items.filter(
           (item) =>
-            (item.year === year || item.year == null) &&
+            inPeriodOrMissing(item) &&
             categoryIdOf(item, kind) != null &&
             item.schoolRewarded,
+        )
+      : [];
+
+  /**
+   * 挂了职称指标、年度却晚于时间窗终点的——多半是今年刚出的成果。
+   *
+   * 「申报年度当年的成果不算」是附件2 的规定，但它反直觉：刚建好、挂好指标的东西
+   * 在「2026 年申报」的表里找不到，用户第一反应是没存上（CLAUDE.md 成果页那条
+   * 「只讲规则不报数」的同一个坑）。所以要报出来。**任现职之前的不报**：
+   * 那是一大批老成果，每次都列一遍就成了噪音，而且不会有人以为它们该在表里
+   */
+  const toYear = promotionWindow(titleSince, year).toYear;
+  const afterWindow =
+    kind === "promotion"
+      ? items.filter(
+          (item) =>
+            item.year != null &&
+            item.year > toYear &&
+            categoryIdOf(item, kind) != null,
         )
       : [];
 
@@ -256,7 +319,7 @@ export function preflightDeclaration(
     : items.filter(
         (item) =>
           !excludedBySchoolReward(item, year, kind) &&
-          (item.year === year || item.year == null) &&
+          inPeriodOrMissing(item) &&
           categoryIdOf(item, kind) != null &&
           !item.isVerified,
       );
@@ -273,6 +336,8 @@ export function preflightDeclaration(
   const suspicious = included.filter((item) => item.status in SUSPICIOUS_STATUS);
 
   const kindLabel = kind === "promotion" ? "职称" : "绩效";
+  // 数字两边留空格、汉字紧挨着，和别处的文案排法一致
+  const tableLabel = kind === "promotion" ? "这张职称表" : ` ${year} 年表`;
 
   const candidates: PreflightIssue[] = [
     issueOf(
@@ -290,6 +355,13 @@ export function preflightDeclaration(
       orphanScored,
     ),
     issueOf(
+      "afterPromotionWindow",
+      `${toYear + 1} 年及以后的成果`,
+      `按 ${year} 年申报，职称量化只算到 ${toYear}-12-31（附件2 说明第 2 条），这些留到下一次申报。不是没存上。`,
+      "excluded",
+      afterWindow,
+    ),
+    issueOf(
       "unverified",
       "未核实",
       options.includeUnverified
@@ -302,8 +374,8 @@ export function preflightDeclaration(
       "missingYear",
       "没填申报年度",
       options.includeMissingYear
-        ? `本次已显式把这些未分配年度的成果纳入 ${year} 年表。`
-        : `默认不进 ${year} 年表。补上年度，或显式选择带问题导出。`,
+        ? `本次已显式把这些未分配年度的成果纳入${tableLabel}。`
+        : `默认不进${tableLabel}${kind === "promotion" ? "——没有年度就判断不了在不在任现职时间窗里" : ""}。补上年度，或显式选择带问题导出。`,
       options.includeMissingYear ? "included" : "excluded",
       missingYear,
     ),
@@ -348,5 +420,6 @@ export function preflightDeclaration(
     flaggedCount: flagged.size,
     issues: candidates.filter((issue) => issue.count > 0),
     includedCounts,
+    materialCounts,
   };
 }

@@ -56,7 +56,7 @@ export async function HomeGreeting() {
 
   return (
     <section className="greeting-band">
-      <BrandMark className="pointer-events-none absolute -top-3.5 right-14 size-56 text-primary opacity-10 max-sm:-right-12 max-sm:size-40" />
+      <BrandMark className="pointer-events-none absolute -top-3.5 right-14 size-56 text-primary opacity-[0.16] max-sm:-right-12 max-sm:size-40" />
 
       <div className="relative flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {/* 2026-09-12 改版去掉衬线：衬线现在只剩登录页标题和顶栏字标两处 */}

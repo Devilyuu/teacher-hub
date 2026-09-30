@@ -27,3 +27,14 @@ export const captureStudentRecordSchema = z.object({
   typeId: z.string().min(1, "选一个类型"),
   studentId: optionalText,
 });
+
+/**
+ * 速记 → 指导记录（学业导师模块）。形状和上面那个一样，但**刻意是两份**：
+ * 两个模块是两张表、两个开关，共用一个 schema 就等于把它们焊死——
+ * 关掉班主任之后，导师这条路上还得带着 classGroupId 走。
+ */
+export const captureMenteeRecordSchema = z.object({
+  batchId: z.string().min(1),
+  typeId: z.string().min(1, "选一个类型"),
+  menteeId: optionalText,
+});

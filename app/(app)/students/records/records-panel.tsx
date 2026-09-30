@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { InboxTrayArt } from "@/components/empty-art";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -202,22 +203,22 @@ export function RecordsPanel({
                     {type.recordCount} 条记录
                   </p>
                 </div>
-                <form
+                {/* 字典项硬删，走确认；还有记录挂着时服务端会拒绝并给出人话 */}
+                <ConfirmSubmitButton
                   action={async () => {
                     const result = await deleteRecordType(type.id);
                     setTypeDeleteState(result.ok ? null : (result.message ?? null));
                   }}
+                  message={
+                    type.recordCount > 0
+                      ? `「${type.name}」下还有 ${type.recordCount} 条记录，删不掉；确定要试吗？`
+                      : `删除类型「${type.name}」？删掉就没有了。`
+                  }
+                  size="icon-sm"
+                  label={`删除类型 ${type.name}`}
                 >
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground"
-                    aria-label={`删除类型 ${type.name}`}
-                  >
-                    <Trash2 className="size-3" aria-hidden />
-                  </Button>
-                </form>
+                  <Trash2 className="size-3" aria-hidden />
+                </ConfirmSubmitButton>
               </li>
             ))}
           </ul>

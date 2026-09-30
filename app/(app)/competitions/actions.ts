@@ -56,11 +56,9 @@ export async function createCompetition(
  * 删赛事。**只删没有参赛记录的**——库里的外键是 Restrict，
  * 硬删有记录的会抛 P2003；用 deleteMany 加条件，删不掉就是没动，不炸页面
  */
-export async function deleteCompetition(formData: FormData): Promise<void> {
+export async function deleteCompetition(id: string): Promise<void> {
   await requireSession();
-
-  const id = formData.get("competitionId");
-  if (typeof id !== "string" || id === "") return;
+  if (!id) return;
 
   await prisma.competition.deleteMany({ where: { id, entries: { none: {} } } });
   revalidateCompetitions();

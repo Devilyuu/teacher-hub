@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { toFormState, type FormState } from "@/lib/form-state";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { requireSession } from "@/lib/server-auth";
+import { isAttachmentKindAllowed } from "@/lib/attachment-kinds";
 import { attachmentUploadSchema } from "@/lib/schemas/attachment";
 import { requirementReportUploadFormSchema } from "@/lib/schemas/material";
 import {
@@ -18,21 +19,24 @@ import {
   isAllowedUpload,
   MAX_UPLOAD_BYTES,
   competitionEntryScope,
+  menteeProjectScope,
   personalScope,
   projectScope,
+  clampUploadFilename,
   saveUpload,
   studentHonorScope,
 } from "@/lib/storage";
 import type { AttachmentKind } from "@/lib/generated/prisma/enums";
 
-/** 五种归属是闭合的可辨识联合，调用方不能组合出多重 owner。
- *  （库里是六选一，第六个 teachingImportId 只由回流接口写，不走这里） */
+/** 六种归属是闭合的可辨识联合，调用方不能组合出多重 owner。
+ *  （库里是七选一，第七个 teachingImportId 只由回流接口写，不走这里） */
 type Owner =
   | { kind: "project"; id: string }
   | { kind: "achievement"; id: string }
   | { kind: "personal"; docCategoryId: string }
   | { kind: "studentHonor"; id: string }
-  | { kind: "competitionEntry"; id: string };
+  | { kind: "competitionEntry"; id: string }
+  | { kind: "menteeProject"; id: string };
 
 type OwnerFields = {
   projectId: string | null;
@@ -40,6 +44,7 @@ type OwnerFields = {
   docCategoryId: string | null;
   studentHonorId: string | null;
   competitionEntryId: string | null;
+  menteeProjectId: string | null;
 };
 
 type UploadOptions = {
@@ -60,6 +65,8 @@ function ownerPath(owner: Owner): string {
       return `/students/honors/${owner.id}`;
     case "competitionEntry":
       return `/competitions/${owner.id}`;
+    case "menteeProject":
+      return `/mentees/projects/${owner.id}`;
   }
 }
 
@@ -78,6 +85,8 @@ function scopeFor(owner: Owner): string {
       return studentHonorScope(owner.id);
     case "competitionEntry":
       return competitionEntryScope(owner.id);
+    case "menteeProject":
+      return menteeProjectScope(owner.id);
     case "personal":
       return personalScope();
   }
@@ -91,6 +100,7 @@ function ownerFields(owner: Owner): OwnerFields {
     docCategoryId: null,
     studentHonorId: null,
     competitionEntryId: null,
+    menteeProjectId: null,
   };
   switch (owner.kind) {
     case "project":
@@ -103,6 +113,8 @@ function ownerFields(owner: Owner): OwnerFields {
       return { ...empty, studentHonorId: owner.id };
     case "competitionEntry":
       return { ...empty, competitionEntryId: owner.id };
+    case "menteeProject":
+      return { ...empty, menteeProjectId: owner.id };
   }
 }
 
@@ -201,6 +213,21 @@ async function uploadAttachment(
   });
   if (!parsed.success) return toFormState(parsed.error);
 
+  // 按归属复核类型：界面下拉只给这几项，服务端不能照收别的（lib/attachment-kinds.ts）。
+  // 个人文档和奖状走 forcedKind，不经过这里
+  if (
+    !options.forcedKind &&
+    owner.kind !== "personal" &&
+    owner.kind !== "studentHonor" &&
+    !isAttachmentKindAllowed(owner.kind, parsed.data.kind)
+  ) {
+    return {
+      ok: false,
+      message: "这里不收这个类型的材料，换一个类型再传",
+      fieldErrors: { kind: ["这里不收这个类型"] },
+    };
+  }
+
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
     return { ok: false, message: "请选择要上传的文件", fieldErrors: { file: ["未选择文件"] } };
@@ -223,6 +250,9 @@ async function uploadAttachment(
       fieldErrors: { file: ["类型不支持"] },
     };
   }
+
+  // 进库的是截短后的名字（下载时它要进 Content-Disposition，太长会把响应头撑成 502）
+  const storedName = clampUploadFilename(file.name);
 
   // 确认归属对象存在再落盘，免得留下没有归属的孤儿文件。
   // 分类 id 虽然来自下拉框，仍是不可信的 FormData，必须到库里重读。
@@ -251,6 +281,12 @@ async function uploadAttachment(
       select: { id: true },
     });
     if (!entry) return { ok: false, message: "这条参赛记录已经不在了" };
+  } else if (owner.kind === "menteeProject") {
+    const project = await prisma.menteeProject.findUnique({
+      where: { id: owner.id },
+      select: { id: true },
+    });
+    if (!project) return { ok: false, message: "这个学生项目已经不在了" };
   } else {
     personalCategory = await prisma.docCategory.findUnique({
       where: { id: owner.docCategoryId },
@@ -337,7 +373,7 @@ async function uploadAttachment(
         data: {
           ...ownerFields(owner),
           kind: parsed.data.kind,
-          filename: file.name,
+          filename: storedName,
           storagePath: saved.storagePath,
           size: saved.size,
           mimeType: file.type,
@@ -352,7 +388,7 @@ async function uploadAttachment(
           created.id,
           "上传个人常用文档",
           {
-            filename: file.name,
+            filename: storedName,
             categoryId: personalCategory!.id,
             categoryName: personalCategory!.name,
             kind: parsed.data.kind,
@@ -407,7 +443,7 @@ async function uploadAttachment(
   if (owner.kind !== "personal") {
     const entityType = uploadEntityType(owner);
     await logActivity(entityType, owner.id, "上传附件", {
-      filename: file.name,
+      filename: storedName,
       kind: parsed.data.kind,
       size: saved.size,
     });
@@ -417,7 +453,7 @@ async function uploadAttachment(
       "RequirementAttachment",
       `${options.requirementId}:${attachment.id}`,
       "上传并关联结题报告",
-      { projectId: owner.id, filename: file.name },
+      { projectId: owner.id, filename: storedName },
     );
   }
   if (options.legacyAchievementId && owner.kind === "project") {
@@ -432,10 +468,10 @@ async function uploadAttachment(
   return {
     ok: true,
     message: options.legacyAchievementId
-      ? `已迁为课题结题材料 ${file.name}`
+      ? `已迁为课题结题材料 ${storedName}`
       : options.requirementId
-        ? `已上传并关联结题报告 ${file.name}`
-        : `已上传 ${file.name}`,
+        ? `已上传并关联结题报告 ${storedName}`
+        : `已上传 ${storedName}`,
   };
 }
 
@@ -495,6 +531,16 @@ export async function uploadCompetitionAttachment(
 ): Promise<FormState> {
   await requireSession();
   return uploadAttachment({ kind: "competitionEntry", id: entryId }, formData);
+}
+
+/** 学生项目材料：任务书、开题报告、中期检查表、作品文件、评审表 */
+export async function uploadMenteeProjectAttachment(
+  projectId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  await requireSession();
+  return uploadAttachment({ kind: "menteeProject", id: projectId }, formData);
 }
 
 function duplicateCategoryState(name: string): FormState {
@@ -618,7 +664,7 @@ export async function uploadRequirementReport(
 /** 审计日志里这条附件算哪个实体。穷尽 switch，理由同 scopeFor */
 function uploadEntityType(
   owner: Exclude<Owner, { kind: "personal" }>,
-): "Project" | "Achievement" | "StudentHonor" | "CompetitionEntry" {
+): "Project" | "Achievement" | "StudentHonor" | "CompetitionEntry" | "MenteeProject" {
   switch (owner.kind) {
     case "project":
       return "Project";
@@ -628,6 +674,8 @@ function uploadEntityType(
       return "StudentHonor";
     case "competitionEntry":
       return "CompetitionEntry";
+    case "menteeProject":
+      return "MenteeProject";
   }
 }
 
@@ -638,6 +686,7 @@ type StoredAttachmentOwner = {
   docCategoryId: string | null;
   studentHonorId: string | null;
   competitionEntryId: string | null;
+  menteeProjectId: string | null;
   storagePath: string;
   filename: string;
 };
@@ -656,6 +705,11 @@ type InferredAttachmentOwner =
       kind: "competitionEntry";
       entityType: "CompetitionEntry";
       entityId: string;
+    }
+  | {
+      kind: "menteeProject";
+      entityType: "MenteeProject";
+      entityId: string;
     };
 
 function inferStoredAttachmentOwner(attachment: StoredAttachmentOwner): InferredAttachmentOwner {
@@ -665,6 +719,7 @@ function inferStoredAttachmentOwner(attachment: StoredAttachmentOwner): Inferred
     attachment.docCategoryId,
     attachment.studentHonorId,
     attachment.competitionEntryId,
+    attachment.menteeProjectId,
   ].filter((value) => value !== null).length;
   if (ownerCount !== 1) {
     throw new Error(`附件 ${attachment.id} 归属异常，拒绝删除`);
@@ -692,6 +747,13 @@ function inferStoredAttachmentOwner(attachment: StoredAttachmentOwner): Inferred
       kind: "competitionEntry",
       entityType: "CompetitionEntry",
       entityId: attachment.competitionEntryId,
+    };
+  }
+  if (attachment.menteeProjectId !== null) {
+    return {
+      kind: "menteeProject",
+      entityType: "MenteeProject",
+      entityId: attachment.menteeProjectId,
     };
   }
   return {
@@ -722,6 +784,7 @@ async function deleteAttachmentInternal(
       docCategoryId: true,
       studentHonorId: true,
       competitionEntryId: true,
+      menteeProjectId: true,
       storagePath: true,
       filename: true,
     },

@@ -58,6 +58,14 @@ describe("uploadMeetingRecording", () => {
     expect(options.reserve).toHaveBeenCalledWith("meeting-1", expect.objectContaining({ cloudConsentAt: null }));
   });
 
+  it("桌面版（不能送云端转写）：不要求同意上传腾讯云，客户端就算报了同意也不记同意时间", async () => {
+    for (const accepted of [false, true]) {
+      const options = deps({ cloudTranscription: false });
+      await expect(uploadMeetingRecording("meeting-1", file(), accepted, options)).resolves.toMatchObject({ status: "UPLOADED" });
+      expect(options.reserve).toHaveBeenCalledWith("meeting-1", expect.objectContaining({ cloudConsentAt: null }));
+    }
+  });
+
   it("compensates both the reservation and private file when metadata validation fails", async () => {
     const options = deps({ probeMetadata: vi.fn(async () => { throw new Error("bad audio"); }) });
     await expect(uploadMeetingRecording("meeting-1", file(), true, options)).rejects.toThrow("bad audio");

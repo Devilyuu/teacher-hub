@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   createSessionToken,
   isPublicUnauthenticatedPath,
+  safeRedirectTarget,
+  sessionCookieSecure,
   verifyPasscode,
   verifySessionToken,
 } from "./auth";
@@ -12,14 +14,40 @@ beforeAll(() => {
 });
 
 describe("verifyPasscode", () => {
-  it("口令一致时通过", () => {
-    expect(verifyPasscode("correct-horse")).toBe(true);
+  it("口令一致时通过", async () => {
+    expect(await verifyPasscode("correct-horse")).toBe(true);
   });
 
-  it("口令不一致时拒绝", () => {
-    expect(verifyPasscode("wrong-horse")).toBe(false);
-    expect(verifyPasscode("correct-hors")).toBe(false);
-    expect(verifyPasscode("")).toBe(false);
+  it("口令不一致时拒绝", async () => {
+    expect(await verifyPasscode("wrong-horse")).toBe(false);
+    expect(await verifyPasscode("correct-hors")).toBe(false);
+    expect(await verifyPasscode("")).toBe(false);
+  });
+});
+
+describe("safeRedirectTarget", () => {
+  it("接受站内路径，带查询串也行", () => {
+    expect(safeRedirectTarget("/projects/abc?tab=tasks")).toBe("/projects/abc?tab=tasks");
+    expect(safeRedirectTarget("/")).toBe("/");
+  });
+
+  it("空值、相对路径、协议 URL 都落回首页", () => {
+    expect(safeRedirectTarget(undefined)).toBe("/");
+    expect(safeRedirectTarget("")).toBe("/");
+    expect(safeRedirectTarget("projects")).toBe("/");
+    expect(safeRedirectTarget("https://evil.com/")).toBe("/");
+  });
+
+  it("挡住协议相对与反斜杠两种跳出站的写法", () => {
+    // `//evil.com` 是协议相对 URL；`/\evil.com` 浏览器会把 \ 当 /
+    expect(safeRedirectTarget("//evil.com")).toBe("/");
+    expect(safeRedirectTarget("/\\evil.com")).toBe("/");
+    expect(safeRedirectTarget("/\\\\evil.com")).toBe("/");
+    expect(safeRedirectTarget("/%5Cevil.com")).toBe("/%5Cevil.com");
+  });
+
+  it("带控制字符的一律拒绝", () => {
+    expect(safeRedirectTarget("/tasks\r\nSet-Cookie: x")).toBe("/");
   });
 });
 
@@ -88,5 +116,24 @@ describe("isPublicUnauthenticatedPath", () => {
     ]) {
       expect(isPublicUnauthenticatedPath(path), `${path} 不该在白名单里`).toBe(false);
     }
+  });
+});
+
+describe("sessionCookieSecure", () => {
+  it("默认跟着 NODE_ENV：生产开、其余关", () => {
+    expect(sessionCookieSecure({ NODE_ENV: "production" })).toBe(true);
+    expect(sessionCookieSecure({ NODE_ENV: "development" })).toBe(false);
+    expect(sessionCookieSecure({})).toBe(false);
+  });
+
+  it("显式关掉时生产也不带 Secure——桌面版手机走明文 http 靠的就是它", () => {
+    expect(sessionCookieSecure({ NODE_ENV: "production", SESSION_COOKIE_SECURE: "0" })).toBe(false);
+    expect(sessionCookieSecure({ NODE_ENV: "production", SESSION_COOKIE_SECURE: "false" })).toBe(false);
+    expect(sessionCookieSecure({ NODE_ENV: "development", SESSION_COOKIE_SECURE: "1" })).toBe(true);
+  });
+
+  it("认不出的值当没设", () => {
+    expect(sessionCookieSecure({ NODE_ENV: "production", SESSION_COOKIE_SECURE: "no" })).toBe(true);
+    expect(sessionCookieSecure({ NODE_ENV: "development", SESSION_COOKIE_SECURE: "" })).toBe(false);
   });
 });

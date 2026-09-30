@@ -28,6 +28,26 @@ export function isDone(task: Pick<TaskLike, "status">): boolean {
   return task.status === "DONE";
 }
 
+/** 负责人字段的默认值。表里 `Task.assignee @default("我")`，两处必须一致 */
+export const SELF_ASSIGNEE = "我";
+
+/** 表单里负责人留空或只有空白 = 我自己做 */
+export function normalizeAssignee(raw: string | null | undefined): string {
+  const trimmed = (raw ?? "").trim();
+  return trimmed === "" ? SELF_ASSIGNEE : trimmed;
+}
+
+/**
+ * 「等别人」：没做完、负责人不是我的任务（2026-09-15 首页右栏新卡）。
+ *
+ * 单人平台最容易漏的不是自己的活，而是等合作者的稿、等财务的报账、等学生交的材料——
+ * 它们不在「今日到期」也不在「逾期」里，没人替你催。调研了 29 个教师/学者类工作台，
+ * 这是唯一本平台没有、而多家都单独做成一个视图的模块。
+ */
+export function isWaitingOn(task: Pick<TaskLike, "status"> & { assignee: string }): boolean {
+  return !isDone(task) && normalizeAssignee(task.assignee) !== SELF_ASSIGNEE;
+}
+
 /**
  * 逾期是**算出来的，从不存库**：截止日早于今天且没做完。
  * 存一个 OVERDUE 状态的话，跨过零点就得有人去改它。
@@ -101,11 +121,17 @@ export function parseTags(raw: string): string[] {
  * **以前叫 `inboxTasks`，二期 2.6 改名。** 「收件箱」现在专指待归类的速记
  * （`CaptureItem`），这里是任务视图，两者是首页上并列的两块。
  */
-export function todayQueueTasks<T extends TaskLike>(tasks: T[], now: Date = new Date()): T[] {
+export function todayQueueTasks<T extends TaskLike & { assignee?: string }>(
+  tasks: T[],
+  now: Date = new Date(),
+): T[] {
   return sortTasks(
     tasks.filter(
       (task) =>
         !isDone(task) &&
+        // 等别人的有自己那张卡（首页右栏），不在这里重复出现——
+        // 同一条逾期任务两张卡各列一次，用户会以为是两件事
+        !(task.assignee != null && isWaitingOn({ status: task.status, assignee: task.assignee })) &&
         (isOverdue(task, now) || isDueToday(task, now) || task.priority === "HIGH"),
     ),
   );

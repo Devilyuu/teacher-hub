@@ -62,5 +62,11 @@ test-results/
 /.claude/skills/
 .worktrees/
 
+# 演示截图、导出样张等本地产物。以前只忽略了 /output/migrations/*.json，
+# 于是一次 `git add -A` 就会把几 MB 截图连同带真实姓名的课表原件一起提交进来
+/output/
+# 教务系统导出的真实课表（带姓名）。测试夹具在 test/fixtures/ 下，那个是跟踪的
+/test/*.xls
+
 # 开源导出器的目录标记
 /.public-export

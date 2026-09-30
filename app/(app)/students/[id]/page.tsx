@@ -45,7 +45,7 @@ export default async function StudentDetailPage({
 
   return (
     <div className="space-y-6">
-      <StudentTabs />
+      <StudentTabs classId={student.classGroupId} />
 
       <header className="flex flex-wrap items-end justify-between gap-4 pt-2">
         <div className="space-y-2">
@@ -65,6 +65,7 @@ export default async function StudentDetailPage({
         </div>
         <StudentRowActions
           studentId={student.id}
+          classGroupId={student.classGroupId}
           name={student.name}
           active={student.active}
         />

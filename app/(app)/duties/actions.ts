@@ -114,8 +114,8 @@ export async function createDutyRecord(_prev: FormState, formData: FormData): Pr
     },
   });
 
-  // 顺带给每个人建一条任务。**默认不建**——排班表本身就是记录，
-  // 多数排班不需要变成待办，勾了才建
+  // 顺带给每个人建一条任务。**默认不建**——轮派记录本身就是记录，
+  // 多数轮派不需要变成待办，勾了才建
   if (formData.get("generateTasks") === "on") {
     const teachers = await prisma.teacher.findMany({ where: { id: { in: teacherIds } } });
     await prisma.task.createMany({

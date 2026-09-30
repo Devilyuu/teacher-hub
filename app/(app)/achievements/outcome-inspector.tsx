@@ -327,7 +327,7 @@ function OutcomePanel({
 
       <Link
         href={data.href}
-        className="flex items-center justify-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        className="flex items-center justify-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_12%)]"
       >
         打开完整详情
         <ArrowUpRight className="size-4" aria-hidden />

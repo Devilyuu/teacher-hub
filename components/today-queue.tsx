@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ListChecks } from "lucide-react";
 import { DecorTile } from "@/components/decor-tile";
 import { TeaCupArt } from "@/components/empty-art";
+import { TodayTaskCheck } from "@/components/today-task-check";
 import { TASK_SOURCE_LABELS } from "@/lib/labels";
 import { dueHint, type TaskLike } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
@@ -90,40 +91,44 @@ export function TodayQueue({
             return (
               <li
                 key={task.id}
-                className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5"
+                className="flex items-baseline gap-3 px-4 py-2.5"
               >
-                {/* `max-sm:basis-full` 同 task-row.tsx：窄屏上标题独占一行，
-                    否则会被右侧徽章群挤成一字一竖行 */}
-                <Link
-                  href="/tasks"
-                  className="min-w-0 flex-1 text-sm underline-offset-4 hover:underline max-sm:basis-full"
-                >
-                  {task.title}
-                </Link>
+                {/* 在首页就能勾掉——这一块存在的理由是「处理掉」，不是「看一眼再跳走」 */}
+                <TodayTaskCheck id={task.id} title={task.title} />
 
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                  <span
-                    className={cn(
-                      "rounded border px-1.5 py-0.5",
-                      task.source === "SUPERIOR"
-                        ? "border-foreground/25 font-medium text-foreground"
-                        : "text-muted-foreground",
-                    )}
+                <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
+                  {/* `max-sm:basis-full` 同 task-row.tsx：窄屏上标题独占一行，
+                      否则会被右侧徽章群挤成一字一竖行 */}
+                  <Link
+                    href="/tasks"
+                    className="min-w-0 flex-1 text-sm underline-offset-4 hover:underline max-sm:basis-full"
                   >
-                    {TASK_SOURCE_LABELS[task.source]}
-                  </span>
-                  {task.relatedProject ? (
-                    <Link
-                      href={`/projects/${task.relatedProject.id}`}
-                      className="text-muted-foreground underline-offset-4 hover:underline"
+                    {task.title}
+                  </Link>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span
+                      className={cn(
+                        "rounded border px-1.5 py-0.5",
+                        task.source === "SUPERIOR"
+                          ? "border-foreground/25 font-medium text-foreground"
+                          : "text-muted-foreground",
+                      )}
                     >
-                      {task.relatedProject.shortTitle ??
-                        task.relatedProject.title}
-                    </Link>
-                  ) : null}
-                  {hint ? (
-                    <span className={TONE_CLASS[hint.tone]}>{hint.text}</span>
-                  ) : null}
+                      {TASK_SOURCE_LABELS[task.source]}
+                    </span>
+                    {task.relatedProject ? (
+                      <Link
+                        href={`/projects/${task.relatedProject.id}`}
+                        className="text-muted-foreground underline-offset-4 hover:underline"
+                      >
+                        {task.relatedProject.shortTitle ?? task.relatedProject.title}
+                      </Link>
+                    ) : null}
+                    {hint ? (
+                      <span className={TONE_CLASS[hint.tone]}>{hint.text}</span>
+                    ) : null}
+                  </div>
                 </div>
               </li>
             );

@@ -81,7 +81,13 @@ describe("personal-document search presentation", () => {
       "参赛",
       "学生",
       "学生荣誉",
+      "导师学生",
+      "学生项目",
     ]);
+    // 「学生」和「导师学生」是两个模块的两张表，组名必须分得开——
+    // 两组同名的话，搜出来的人在哪个模块里根本认不出
+    const labels = SEARCH_GROUPS.map((group) => group.label);
+    expect(new Set(labels).size).toBe(labels.length);
     expect(SEARCH_COPY.description).toContain("文件名与备注");
     expect(SEARCH_COPY.placeholder).toContain("文件名或备注");
     expect(SEARCH_COPY.emptyHint).toContain("文件名与备注");

@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { AddToCalendarLink } from "@/components/add-to-calendar-link";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ModuleDisabledNotice } from "@/components/module-disabled";
 import { entryTitle } from "@/lib/competitions";
+import { formatDateOnly, isTodayOrLater } from "@/lib/date";
 import { prisma } from "@/lib/db";
 import { canPreviewInline } from "@/lib/storage";
 import { getEnabledModules } from "@/lib/module-settings";
@@ -64,6 +66,9 @@ export default async function CompetitionEntryPage({
     track: entry.track,
     level: entry.level,
   });
+  const registerUpcoming =
+    entry.registerDeadline != null && entry.award == null && isTodayOrLater(entry.registerDeadline);
+  const competeUpcoming = entry.competeAt != null && isTodayOrLater(entry.competeAt);
 
   return (
     <div className="space-y-6">
@@ -78,6 +83,30 @@ export default async function CompetitionEntryPage({
         <h1 className="page-title mt-2">{title}</h1>
         {entry.editionText ? (
           <p className="mt-1 text-sm text-muted-foreground">{entry.editionText}</p>
+        ) : null}
+
+        {/* 报名截止和比赛日各一个「加到日历」，只给还没到的日子；
+            出了结果的记录报名截止已无意义（月历页同一条规则）。
+            比赛日只知道「五月中旬」的没有 competeAt，这里就没有按钮——不猜（第 8 条铁律） */}
+        {registerUpcoming || competeUpcoming ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {registerUpcoming ? (
+              <AddToCalendarLink
+                href={`/api/competitions/${entry.id}/calendar?date=register`}
+                title={`报名截止 ${formatDateOnly(entry.registerDeadline!)}，提醒前一天 20:00、当天 8:00`}
+              >
+                报名截止加到日历
+              </AddToCalendarLink>
+            ) : null}
+            {competeUpcoming ? (
+              <AddToCalendarLink
+                href={`/api/competitions/${entry.id}/calendar?date=compete`}
+                title={`比赛日 ${formatDateOnly(entry.competeAt!)}，提醒前一天 20:00、当天 8:00`}
+              >
+                比赛日加到日历
+              </AddToCalendarLink>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

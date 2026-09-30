@@ -334,6 +334,7 @@ describe("calcProjectGap · 倒计时", () => {
     expect(result.daysLeft).toBe(67);
     expect(result.applyDaysLeft).toBe(3);
     expect(result.displayDaysLeft).toBe(67);
+    expect(result.displayDeadline).toBe("closing");
   });
 
   it("申报期课题的 displayDaysLeft 取申报截止日", () => {
@@ -347,6 +348,7 @@ describe("calcProjectGap · 倒计时", () => {
     );
 
     expect(result.displayDaysLeft).toBe(3);
+    expect(result.displayDeadline).toBe("apply");
   });
 
   it("没填对应截止日时 displayDaysLeft 为 null", () => {

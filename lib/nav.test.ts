@@ -7,9 +7,11 @@ import {
 } from "./modules";
 import {
   ACHIEVEMENT_TABS,
+  MENTEE_TABS,
   NAV_ITEMS,
   ROUTINE_TABS,
   activeAchievementTab,
+  activeMenteeTab,
   activeNavHref,
   mobileTabsFor,
   navItemsFor,
@@ -24,7 +26,7 @@ const ALL_OFF = Object.fromEntries(
 ) as ModuleVisibility;
 
 describe("NAV_ITEMS", () => {
-  it("全集是首页/日常/科研/教学/参赛/班主任/成果七项，顺序固定", () => {
+  it("全集是首页/日常/科研/教学/参赛/班主任/导师/成果八项，顺序固定", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "首页",
       "日常",
@@ -32,11 +34,12 @@ describe("NAV_ITEMS", () => {
       "教学",
       "参赛",
       "班主任",
+      "导师",
       "成果",
     ]);
   });
 
-  it("默认开关下渲染出六项——班主任默认关闭", () => {
+  it("默认开关下渲染出六项——班主任和导师默认关闭", () => {
     expect(navItemsFor(DEFAULT_MODULE_VISIBILITY).map((item) => item.label)).toEqual([
       "首页",
       "日常",
@@ -47,12 +50,16 @@ describe("NAV_ITEMS", () => {
     ]);
   });
 
-  it("一级入口上限 = 默认可见不超过 6 项；全开也就 7 项", () => {
-    // 2026-09-12 加「参赛」时从 5 抬到 6（理由记在 lib/nav.ts 的注释里）。
-    // 这条断言的作用不是挡住第 7 项，是**让抬上限这件事必须改测试**——
-    // 顺手多塞一项而没人注意到，才是导航变成抽屉的方式
+  it("一级入口上限 = 默认可见不超过 6 项；全开 8 项", () => {
+    // 2026-09-12 加「参赛」时从 5 抬到 6；2026-09-21 加「导师」时全集到 8
+    // （两次的理由都记在 lib/nav.ts 的注释里）。
+    // 这条断言的作用不是挡住下一项，是**让抬上限这件事必须改测试**——
+    // 顺手多塞一项而没人注意到，才是导航变成抽屉的方式。
+    //
+    // 默认可见仍是 6：班主任、导师都 defaultEnabled:false，
+    // 真实同时启用的上限是 7。
     expect(navItemsFor(DEFAULT_MODULE_VISIBILITY).length).toBeLessThanOrEqual(6);
-    expect(navItemsFor(ALL_ON).length).toBeLessThanOrEqual(7);
+    expect(navItemsFor(ALL_ON).length).toBeLessThanOrEqual(8);
   });
 
   it("骨架项不受开关影响——全关也剩首页/日常/科研/成果", () => {
@@ -79,6 +86,7 @@ describe("NAV_ITEMS", () => {
       "/teaching",
       "/competitions",
       "/students",
+      "/mentees",
       "/achievements",
     ]);
   });
@@ -104,10 +112,11 @@ describe("mobileTabsFor（手机底部导航）", () => {
     ]);
   });
 
-  it("教学和班主任开着也不进底栏——五项是手机底栏的上限", () => {
+  it("教学、班主任、导师开着也不进底栏——五项是手机底栏的上限", () => {
     const labels = mobileTabsFor(ALL_ON).map((item) => item.label);
     expect(labels).not.toContain("教学");
     expect(labels).not.toContain("班主任");
+    expect(labels).not.toContain("导师");
     expect(labels.length).toBeLessThanOrEqual(5);
   });
 
@@ -195,10 +204,42 @@ describe("activeNavHref", () => {
     expect(activeNavHref("/teaching")).toBe("/teaching");
   });
 
+  it("班主任和导师各点亮自己那一项——两个模块不许互相吃掉对方的路径", () => {
+    // advisor = 班主任、mentor = 学业导师。英文 advisor 本义就是「导师」，
+    // 这两个词在中文里都像「导师」，路由撞车的后果是**导师页面被判给
+    // 一个默认关闭的模块，直接打不开**
+    expect(activeNavHref("/students")).toBe("/students");
+    expect(activeNavHref("/students/records")).toBe("/students");
+    expect(activeNavHref("/mentees")).toBe("/mentees");
+    expect(activeNavHref("/mentees/records")).toBe("/mentees");
+    expect(moduleForPath("/mentees")).toBe("mentor");
+    expect(moduleForPath("/mentees/records")).toBe("mentor");
+    expect(moduleForPath("/students")).toBe("advisor");
+  });
+
   it("设置和档案不点亮任何一级导航——它们是顶栏工具，不占一级位置", () => {
     expect(activeNavHref("/settings")).toBeNull();
     expect(activeNavHref("/profile")).toBeNull();
     expect(activeNavHref("/search")).toBeNull();
+  });
+});
+
+describe("activeMenteeTab", () => {
+  it("学生详情归「我的学生」，记录页归「指导记录」", () => {
+    expect(activeMenteeTab("/mentees")).toBe("/mentees");
+    expect(activeMenteeTab("/mentees/abc")).toBe("/mentees");
+    expect(activeMenteeTab("/mentees/records")).toBe("/mentees/records");
+  });
+
+  it("不吃掉班主任的路径", () => {
+    expect(activeMenteeTab("/students")).toBeNull();
+    expect(activeMenteeTab("/students/records")).toBeNull();
+  });
+
+  it("每个 tab 的 href 都在自己的模块路由前缀下", () => {
+    for (const tab of MENTEE_TABS) {
+      expect(moduleForPath(tab.href), tab.href).toBe("mentor");
+    }
   });
 });
 

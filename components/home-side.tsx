@@ -1,16 +1,23 @@
 import Link from "next/link";
 import {
-  Activity,
   CalendarDays,
+  Handshake,
   Hourglass,
   type LucideIcon,
 } from "lucide-react";
 import { DecorTile, type DecorDomain } from "@/components/decor-tile";
-import { ClearCalendarArt } from "@/components/empty-art";
+import { ClearCalendarArt, ClipboardArt } from "@/components/empty-art";
 import { formatDaysLeft } from "@/lib/format";
 import { MEETING_TYPE_LABELS } from "@/lib/labels";
+import { dueHint, type TaskLike } from "@/lib/tasks";
 import { cn } from "@/lib/utils";
 import type { MeetingType } from "@/lib/generated/prisma/enums";
+
+export type WaitingOnTask = TaskLike & {
+  id: string;
+  title: string;
+  assignee: string;
+};
 
 export type UpcomingMeeting = {
   id: string;
@@ -109,35 +116,78 @@ export function UpcomingMeetings({
   );
 }
 
-export function WeeklyDigest({
-  doneThisWeek,
-  openTasks,
-}: {
-  doneThisWeek: number;
-  openTasks: number;
-}) {
-  const total = doneThisWeek + openTasks;
-  const rate = total > 0 ? doneThisWeek / total : 0;
+const WAITING_TONE = {
+  overdue: "text-[var(--h-amber-fg)]",
+  today: "font-medium text-foreground",
+  normal: "text-muted-foreground",
+} as const;
 
+/**
+ * 「等别人」：没做完、负责人不是我的任务。
+ *
+ * 2026-09-15 替掉「本周动态」（本周完成 N 项 + 进度条）——用户从不看它。
+ * 调研了 29 个教师/学者类工作台：首页共识就四块（今天要做的、快到期的、
+ * 今天几点有会、课题走到哪一步），本平台早已覆盖；两路调研独立点出的唯一缺口
+ * 都是「等别人 / waiting on」——等合作者的稿、等财务的报账、等学生交的材料，
+ * 不在「今日到期」也不在「逾期」里，没人替你催。处理方式就两种：催完点勾，
+ * 或者改回「我」自己做，处理完就从这里消失（首页只放能被处理掉的事）。
+ */
+export function WaitingOn({
+  tasks,
+  overflow = 0,
+}: {
+  tasks: WaitingOnTask[];
+  overflow?: number;
+}) {
   return (
-    <SideCard title="本周动态" icon={Activity} domain="task">
-      <p className="text-sm">
-        本周完成{" "}
-        <span className="font-medium tabular-nums">{doneThisWeek}</span> 项任务
-      </p>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>在办</span>
-          <span className="tabular-nums">{openTasks}</span>
+    <SideCard
+      title="等别人"
+      icon={Handshake}
+      domain="task"
+      actionHref="/tasks"
+      actionLabel="任务"
+    >
+      {tasks.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-2xl bg-well px-4 py-5 text-center">
+          <ClipboardArt className="size-11 text-muted-foreground/60" />
+          <p className="text-xs text-muted-foreground">
+            没有在等别人的事。任务的「负责人」填了别人的名字，就会列在这里。
+          </p>
         </div>
-        {/* 进度条用中性色。**不碰健康度那六个语义色**（CLAUDE.md 视觉语言） */}
-        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-foreground/40"
-            style={{ width: `${Math.round(rate * 100)}%` }}
-          />
-        </div>
-      </div>
+      ) : (
+        <ul className="space-y-2.5">
+          {tasks.map((task) => {
+            const hint = dueHint(task);
+            return (
+              <li key={task.id}>
+                <Link
+                  href="/tasks"
+                  className="block text-sm underline-offset-4 hover:underline"
+                >
+                  {task.title}
+                </Link>
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  {/* 负责人是这张卡的主角，放最前 */}
+                  <span className="rounded border px-1.5 py-0.5">{task.assignee}</span>
+                  {hint ? (
+                    <span className={cn("tabular-nums", WAITING_TONE[hint.tone])}>{hint.text}</span>
+                  ) : (
+                    <span>没写截止日</span>
+                  )}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {overflow > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          还有 {overflow} 条。
+          <Link href="/tasks" className="underline-offset-4 hover:text-foreground hover:underline">
+            去任务页看全部
+          </Link>
+        </p>
+      ) : null}
     </SideCard>
   );
 }

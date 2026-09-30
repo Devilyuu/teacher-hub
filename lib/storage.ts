@@ -145,6 +145,29 @@ export function isAllowedUpload(mimeType: string, filename: string): boolean {
   return extensions.includes(extname(filename).toLowerCase());
 }
 
+/** 附件原始文件名最多留多少个字（按字符数，不是字节） */
+export const MAX_FILENAME_CHARS = 100;
+
+/**
+ * 原始文件名进库前截短：主名截到上限、**扩展名原样保留**，截过的地方补一个「…」。
+ *
+ * 下载时文件名要 percent-encode 进 `Content-Disposition`，一个汉字 9 个字节。
+ * 不设上限的话，一个两三百字的名字就能把响应头撑过反代的缓冲区，
+ * 浏览器拿到的是 502 而不是文件（2026-09-14 审核报告）。100 个汉字约 900 字节，留足余量。
+ * 按码点数（`Array.from`）截，不会把 emoji 这类代理对从中间劈开。
+ */
+export function clampUploadFilename(filename: string, max = MAX_FILENAME_CHARS): string {
+  const name = filename.trim();
+  const chars = Array.from(name);
+  if (chars.length <= max) return name;
+
+  const extension = extname(name);
+  // 扩展名本身离谱地长（不是真扩展名）就不特殊对待，整体截
+  const keep = extension.length > 0 && extension.length <= 10 ? extension : "";
+  const base = Array.from(name.slice(0, name.length - keep.length));
+  return `${base.slice(0, max - Array.from(keep).length - 1).join("")}…${keep}`;
+}
+
 /**
  * 生成磁盘上的文件名。**完全丢弃用户给的名字**，只保留扩展名，
  * 且扩展名要在白名单里才留，否则不带扩展名。
@@ -258,6 +281,11 @@ export function personalScope(): string {
 /** 参赛材料：赛事通知、报名表、获奖证书（指导参赛模块）。 */
 export function competitionEntryScope(entryId: string): string {
   return `competitions/${entryId}`;
+}
+
+/** 学生项目的任务书、开题报告、作品文件（学业导师模块），单独一个目录。 */
+export function menteeProjectScope(projectId: string): string {
+  return `mentee-projects/${projectId}`;
 }
 
 /** 学生荣誉的奖状照片/扫描件（班主任模块），同样单独一个目录。 */

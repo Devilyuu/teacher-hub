@@ -10,6 +10,9 @@
  * 幂等：按 `(year, majorCategory, minorCategory)` upsert。学校次年发新表时，
  * 换一个 year 的 JSON 再跑一次即可，旧年度原样保留——历史成果必须仍按
  * 当年的规则解释。
+ *
+ * 2026-09-27 起设置页也能导（粘贴表格、导入规则包），写库走的是同一个
+ * `applyPerfPlan`（lib/rules/apply.ts）：只增改不删，文件里没写的开关保留原值。
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
@@ -17,6 +20,7 @@ import { resolve } from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { buildCatalogPlan, majorCategoriesInOrder } from "../lib/import/perf-rules";
+import { applyPerfPlan } from "../lib/rules/apply";
 
 const DEFAULT_SOURCE = "prisma/data/performance-rules-2025.json";
 const apply = process.argv.includes("--apply");
@@ -61,26 +65,7 @@ async function main() {
     return;
   }
 
-  let created = 0;
-  let updated = 0;
-  for (const draft of drafts) {
-    const { year, majorCategory, minorCategory, ...rest } = draft;
-    const existing = await prisma.perfCategory.findUnique({
-      where: {
-        year_majorCategory_minorCategory: { year, majorCategory, minorCategory },
-      },
-      select: { id: true },
-    });
-    await prisma.perfCategory.upsert({
-      where: {
-        year_majorCategory_minorCategory: { year, majorCategory, minorCategory },
-      },
-      create: draft,
-      update: rest,
-    });
-    if (existing) updated += 1;
-    else created += 1;
-  }
+  const { created, updated } = await prisma.$transaction((tx) => applyPerfPlan(tx, drafts));
 
   const total = await prisma.perfCategory.count({ where: { year: drafts[0].year } });
   console.log(`\n已写入：新增 ${created} 条，更新 ${updated} 条。`);

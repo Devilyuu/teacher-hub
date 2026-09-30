@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { logActivity } from "@/lib/activity";
 import { prisma } from "@/lib/db";
-import { isSameOrigin } from "@/lib/export/request";
+import { isSameOriginRequest } from "@/lib/export/request";
 import { formatDateByPrecision } from "@/lib/format";
 import { LEVEL_LABELS } from "@/lib/labels";
 import { getHonors } from "@/lib/queries/students";
@@ -17,8 +17,7 @@ export async function POST(request: Request) {
   const denied = await sessionGuard();
   if (denied) return denied;
 
-  const requestUrl = new URL(request.url);
-  if (!isSameOrigin(requestUrl, request.headers.get("origin"))) {
+  if (!isSameOriginRequest(request)) {
     return Response.json({ error: "拒绝跨站导出请求" }, { status: 403 });
   }
 

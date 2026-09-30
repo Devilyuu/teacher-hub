@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSameOrigin, parseDeclarationRequest } from "./request";
+import { isSameOrigin, isSameOriginRequest, parseDeclarationRequest } from "./request";
 
 function form(entries: Array<[string, string]>): FormData {
   const data = new FormData();
@@ -26,6 +26,7 @@ describe("parseDeclarationRequest", () => {
       isOverride: false,
       preflightFingerprint: "fingerprint-1",
       requestKey: "request-1",
+      format: "xlsx",
     });
   });
 
@@ -156,11 +157,73 @@ describe("parseDeclarationRequest", () => {
   });
 });
 
+describe("parseDeclarationRequest · 导出格式", () => {
+  const base: Array<[string, string]> = [
+    ["kind", "promotion"],
+    ["year", "2027"],
+    ["preflightFingerprint", "fingerprint-1"],
+    ["requestKey", "request-1"],
+  ];
+
+  /** 旧页面、书签没有这个字段，照旧拿到那张 xlsx */
+  it("不带 format 就是 xlsx", () => {
+    expect(parseDeclarationRequest(form(base))).toMatchObject({ ok: true, format: "xlsx" });
+  });
+
+  it("format=zip 是连同支撑材料的申报包，和覆盖开关互不影响", () => {
+    expect(
+      parseDeclarationRequest(
+        form([...base, ["format", "zip"], ["includeUnverified", "true"], ["confirmIssues", "true"]]),
+      ),
+    ).toMatchObject({
+      ok: true,
+      format: "zip",
+      options: { includeUnverified: true, includeMissingYear: false },
+    });
+  });
+
+  it("不认识的格式、重复的格式一律拒绝，不猜", () => {
+    expect(parseDeclarationRequest(form([...base, ["format", "pdf"]]))).toEqual({
+      ok: false,
+      error: "无效的导出格式",
+    });
+    expect(
+      parseDeclarationRequest(form([...base, ["format", "zip"], ["format", "xlsx"]])),
+    ).toEqual({ ok: false, error: "无效的导出格式" });
+  });
+});
+
 describe("isSameOrigin", () => {
   it("只接受与下载接口同源的 POST", () => {
     const requestUrl = new URL("https://desk.example/api/export/declaration");
     expect(isSameOrigin(requestUrl, "https://desk.example")).toBe(true);
     expect(isSameOrigin(requestUrl, "https://evil.example")).toBe(false);
     expect(isSameOrigin(requestUrl, null)).toBe(false);
+  });
+});
+
+describe("isSameOriginRequest", () => {
+  const req = (url: string, headers: Record<string, string>) => ({
+    url,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+  });
+
+  it("服务器版（Nginx 转 Host、request.url 就是站点地址）照旧放行", () => {
+    expect(isSameOriginRequest(req("https://desk.example/api/backup", { origin: "https://desk.example", host: "desk.example" }))).toBe(true);
+  });
+
+  /** 2026-09-28 实测：standalone 里 request.url 恒为 http://localhost:端口，和浏览器地址栏无关 */
+  it("桌面版窗口（127.0.0.1）与手机（局域网地址）按 Host 认出是同源", () => {
+    const url = "http://localhost:5980/api/export/declaration";
+    expect(isSameOriginRequest(req(url, { origin: "http://127.0.0.1:5980", host: "127.0.0.1:5980" }))).toBe(true);
+    expect(isSameOriginRequest(req(url, { origin: "http://192.168.2.11:9258", host: "192.168.2.11:9258" }))).toBe(true);
+  });
+
+  it("跨站页面提交过来：Origin 是别人的、Host 是我们的，拒绝", () => {
+    const url = "http://localhost:5980/api/export/declaration";
+    expect(isSameOriginRequest(req(url, { origin: "http://evil.example", host: "127.0.0.1:5980" }))).toBe(false);
+    expect(isSameOriginRequest(req(url, { origin: "http://127.0.0.1:5981", host: "127.0.0.1:5980" }))).toBe(false);
+    expect(isSameOriginRequest(req(url, { host: "127.0.0.1:5980" }))).toBe(false);
+    expect(isSameOriginRequest(req(url, { origin: "null", host: "127.0.0.1:5980" }))).toBe(false);
   });
 });

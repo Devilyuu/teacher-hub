@@ -4,7 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ALLOWED_MIME_TYPES,
+  MAX_FILENAME_CHARS,
   canPreviewInline,
+  clampUploadFilename,
   isAllowedUpload,
   personalScope,
   isSameOrAncestorPath,
@@ -296,5 +298,37 @@ describe("白名单自洽", () => {
         expect(extension, mime).toMatch(/^\.[a-z0-9]+$/);
       }
     }
+  });
+});
+
+describe("clampUploadFilename · 原始文件名截短", () => {
+  it("不超上限的原样留着（只去首尾空白）", () => {
+    expect(clampUploadFilename("  结题报告（定稿）.pdf ")).toBe("结题报告（定稿）.pdf");
+    const exact = `${"材".repeat(MAX_FILENAME_CHARS - 4)}.pdf`;
+    expect(clampUploadFilename(exact)).toBe(exact);
+  });
+
+  // 下载时要 percent-encode 进 Content-Disposition，一个汉字 9 字节，
+  // 太长会把响应头撑过反代缓冲区，浏览器拿到 502（2026-09-14 审核报告）
+  it("超长的截主名、留扩展名，截过的地方补「…」，总长正好是上限", () => {
+    const clamped = clampUploadFilename(`${"很长的课题名".repeat(60)}.docx`);
+    expect(clamped.endsWith("….docx")).toBe(true);
+    expect(Array.from(clamped)).toHaveLength(MAX_FILENAME_CHARS);
+  });
+
+  it("按码点截，不会把 emoji 劈成半个代理对", () => {
+    const clamped = clampUploadFilename(`${"🎓".repeat(200)}.png`, 10);
+    expect(clamped).toBe(`${"🎓".repeat(5)}….png`);
+  });
+
+  it("「扩展名」离谱地长就不当扩展名，整体截", () => {
+    const clamped = clampUploadFilename(`报告.${"x".repeat(50)}`, 20);
+    expect(Array.from(clamped)).toHaveLength(20);
+    expect(clamped.endsWith("…")).toBe(true);
+  });
+
+  it("截完的名字进响应头不超过 1KB", () => {
+    const header = encodeURIComponent(clampUploadFilename(`${"汉".repeat(500)}.pdf`));
+    expect(header.length).toBeLessThan(1024);
   });
 });

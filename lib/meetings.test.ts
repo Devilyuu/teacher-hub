@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  isMeetingSettled,
+  isUpcomingMeeting,
   parseAgenda,
   parseMeetingTime,
   parseResolutions,
   pendingResolutionCount,
+  splitMeetingsByTime,
   toDatetimeLocal,
 } from "./meetings";
 
@@ -86,6 +89,16 @@ describe("pendingResolutionCount", () => {
   });
 });
 
+describe("isUpcomingMeeting", () => {
+  const now = new Date(Date.UTC(2026, 8, 17, 6, 0));
+
+  it("晚于现在才算没开，开会那一刻起就不算了", () => {
+    expect(isUpcomingMeeting(new Date(Date.UTC(2026, 8, 17, 6, 1)), now)).toBe(true);
+    expect(isUpcomingMeeting(new Date(now), now)).toBe(false);
+    expect(isUpcomingMeeting(new Date(Date.UTC(2026, 8, 16, 6, 0)), now)).toBe(false);
+  });
+});
+
 describe("parseMeetingTime", () => {
   it("解析 datetime-local 的值", () => {
     const parsed = parseMeetingTime("2026-07-08T14:30");
@@ -112,5 +125,56 @@ describe("toDatetimeLocal", () => {
 
   it("个位数月日时分补零", () => {
     expect(toDatetimeLocal(new Date(2026, 0, 5, 9, 5))).toBe("2026-01-05T09:05");
+  });
+});
+
+describe("splitMeetingsByTime", () => {
+  const now = new Date(Date.UTC(2026, 8, 21, 6, 0));
+  const at = (day: number, hour = 6) => ({
+    meetingTime: new Date(Date.UTC(2026, 8, day, hour)),
+    id: `d${day}`,
+  });
+
+  it("两段排序方向相反：即将召开最近的在最上，已开过刚开完的在最上", () => {
+    // 库里是统一倒序取回来的，这里照原样喂进去
+    const rows = [at(30), at(23), at(21, 7), at(16), at(9)];
+    const { upcoming, past } = splitMeetingsByTime(rows, now);
+
+    expect(upcoming.map((r) => r.id)).toEqual(["d21", "d23", "d30"]);
+    expect(past.map((r) => r.id)).toEqual(["d16", "d9"]);
+  });
+
+  it("开会那一刻起就归到已开过，和 isUpcomingMeeting 同一条界", () => {
+    const { upcoming, past } = splitMeetingsByTime(
+      [{ meetingTime: new Date(now), id: "now" }],
+      now,
+    );
+    expect(upcoming).toEqual([]);
+    expect(past.map((r) => r.id)).toEqual(["now"]);
+  });
+
+  it("不改动传入的数组", () => {
+    const rows = [at(30), at(9)];
+    const snapshot = [...rows];
+    splitMeetingsByTime(rows, now);
+    expect(rows).toEqual(snapshot);
+  });
+});
+
+describe("isMeetingSettled", () => {
+  const now = new Date(Date.UTC(2026, 8, 21, 6, 0));
+  const past = new Date(Date.UTC(2026, 8, 16, 6, 0));
+  const future = new Date(Date.UTC(2026, 8, 23, 6, 0));
+
+  it("开过且决议都派下去了才算结清——调淡的判据是它", () => {
+    expect(isMeetingSettled({ meetingTime: past, pendingResolutions: 0 }, now)).toBe(true);
+  });
+
+  it("还欠着决议就不算结清：那条琥珀提醒不许跟着整行一起调淡", () => {
+    expect(isMeetingSettled({ meetingTime: past, pendingResolutions: 2 }, now)).toBe(false);
+  });
+
+  it("还没开的会一律不算结清", () => {
+    expect(isMeetingSettled({ meetingTime: future, pendingResolutions: 0 }, now)).toBe(false);
   });
 });

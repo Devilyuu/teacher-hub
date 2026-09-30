@@ -4,14 +4,23 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { deleteHonor } from "../../actions";
 
-export function HonorDelete({ honorId, title }: { honorId: string; title: string }) {
+export function HonorDelete({
+  honorId,
+  classGroupId,
+  title,
+}: {
+  honorId: string;
+  classGroupId: string;
+  title: string;
+}) {
   const router = useRouter();
 
   return (
     <form
       action={async () => {
         await deleteHonor(honorId);
-        router.push("/students/honors");
+        // 回荣誉列表要带上班级，否则带两个班的老师会被送回默认班
+        router.push(`/students/honors?class=${encodeURIComponent(classGroupId)}`);
       }}
     >
       <Button

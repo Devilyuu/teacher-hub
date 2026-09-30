@@ -4,24 +4,25 @@ import type { Level } from "@/lib/generated/prisma/enums";
 /**
  * 一条成果是从哪儿「引用」过来的。
  *
- * 台账里绝大多数成果是直接建的，没有来源。有来源的只有两类，
+ * 台账里绝大多数成果是直接建的，没有来源。有来源的只有三类，
  * 而它们走的是**同一个模式**：外部/过程记录留在自己那张表里，
  * 用户人工点「引用为成果」才建 Achievement，系统绝不自动创建（第 1 条铁律）。
  *
  * - 教案回流（`TeachingImport`，增量 3.6）
  * - 指导参赛（`CompetitionEntry`，2026-09-12）
+ * - 导师学生项目（`MenteeProject`，导师 M3）
  *
  * 补这个反链是因为指针一直是**单向**的：来源那边能跳到成果，成果这边跳不回去。
  * 于是台账里冒出一条「指导学生获省一等奖」，想核对是哪次比赛、谁参的赛、
  * 证书在不在，只能回参赛页一条条翻。
  *
- * 放在 lib/outcomes 下而不是各自模块里：**两类来源渲染成同一行**，
+ * 放在 lib/outcomes 下而不是各自模块里：**几类来源渲染成同一行**，
  * 分两处写早晚长成两个样子。
  */
 export type AchievementSource = {
   /** React key，也是「哪张表的哪一行」 */
   key: string;
-  kind: "competition" | "teaching";
+  kind: "competition" | "mentee" | "teaching";
   /** 来源类型的中文名，行首那个标签 */
   kindLabel: string;
   /** 这条来源本身怎么称呼 */
@@ -39,6 +40,13 @@ export type CompetitionSourceRow = {
   competition: { name: string };
 };
 
+export type MenteeProjectSourceRow = {
+  id: string;
+  title: string;
+  schoolYear: string | null;
+  kind: { name: string };
+};
+
 export type TeachingSourceRow = {
   id: string;
   title: string;
@@ -47,8 +55,8 @@ export type TeachingSourceRow = {
 };
 
 /**
- * 汇总来源。**参赛在前**：它带日期、带队员、带证书，是核对时更想先看的那个；
- * 教案回流只是一份 DOCX。
+ * 汇总来源。**参赛在前、学生项目其次**：它们带日期、带学生、带证书，
+ * 是核对时更想先看的；教案回流只是一份 DOCX。
  *
  * 返回数组而不是单个值：库里这两个都是反向一对多关系。实际上一条成果
  * 最多只有一个来源（引用动作会挡住重复引用），但**按类型硬当成单值就是在
@@ -57,6 +65,7 @@ export type TeachingSourceRow = {
  */
 export function achievementSources(row: {
   competitionEntries?: CompetitionSourceRow[];
+  menteeProjects?: MenteeProjectSourceRow[];
   teachingImports?: TeachingSourceRow[];
 }): AchievementSource[] {
   const sources: AchievementSource[] = [];
@@ -74,6 +83,18 @@ export function achievementSources(row: {
       }),
       href: `/competitions/${entry.id}`,
       hint: null,
+    });
+  }
+
+  for (const project of row.menteeProjects ?? []) {
+    sources.push({
+      key: `mentee:${project.id}`,
+      kind: "mentee",
+      kindLabel: "学生项目",
+      label: project.title,
+      // 导师模块关着时这里会落到「未启用」提示页——关闭是隐藏不是删除，链接照给
+      href: `/mentees/projects/${project.id}`,
+      hint: [project.kind.name, project.schoolYear].filter(Boolean).join(" · ") || null,
     });
   }
 

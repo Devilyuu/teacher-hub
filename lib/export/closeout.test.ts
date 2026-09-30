@@ -27,6 +27,7 @@ function gap(overrides: Partial<ProjectGap> = {}): ProjectGap {
     daysLeft: null,
     applyDaysLeft: null,
     displayDaysLeft: null,
+    displayDeadline: "closing",
     health: "UNSET",
     reusedAchievementIds: [],
     ...overrides,
